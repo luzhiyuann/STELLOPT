@@ -9,21 +9,25 @@ DA = 1.66053906660E-27 # Dalton
 ME = 9.1093837E-31 # Electron mass [kg]
 MP = 1.672621637E-27 # Proton mass [kg]
 EPS0 = 8.8541878188E-12 # Vacuum permittivity [F/m]
+MU0 = 1.25663706143E-6  # Vacuum permeability [N/A^2]
 
 import numpy as np
 
 class PLASMA:
     
-    def __init__(self,list_of_species):
+    def __init__(self,list_of_species,lverb=False):
         
-        self.species_database = ['electrons','hydrogen','deuterium','tritium','helium3','helium4']
+        self.lverb = lverb
+        
+        self.species_database = ['electrons','hydrogen','deuterium','tritium','helium3','helium4','tungsten74']
         self.mass_database = {
             'electrons' : ME,
             'hydrogen'  : 1.007276466621*DA,
             'deuterium' : 2.01410177811*DA,
             'tritium'   : 3.01604928*DA,
             'helium3'   : 3.0160293*DA,
-            'helium4'   : 4.002603254*DA
+            'helium4'   : 4.002603254*DA,
+            'tungsten74': 183.84*DA
         }
         self.charge_database = {
             'electrons' : -EC,
@@ -31,7 +35,8 @@ class PLASMA:
             'deuterium' : EC,
             'tritium'   : EC,
             'helium3'   : 2.0*EC,
-            'helium4'   : 2.0*EC
+            'helium4'   : 2.0*EC,
+            'tungsten74': 74.0*EC
         }
         self.Zcharge_database = {
             'electrons' : -1,
@@ -39,7 +44,8 @@ class PLASMA:
             'deuterium' : 1,
             'tritium'   : 1,
             'helium3'   : 2,
-            'helium4'   : 2
+            'helium4'   : 2,
+            'tungsten74': 74
         }
         
         self.mass = {}
@@ -58,7 +64,7 @@ class PLASMA:
         #create self.ion_species and self.num_ion_species
         self.set_ion_species()
         
-        print(f'Plasma created with species: {", ".join(self.list_of_species)}')      
+        if(lverb): print(f'Plasma created with species: {", ".join(self.list_of_species)}')      
     
     def check_species_exist(self, species_list):
         # Ensure species_list is a list of strings
@@ -87,8 +93,33 @@ class PLASMA:
         
         for species in species_list:
             self.Zcharge[species]  = self.Zcharge_database[f'{species}'] 
+            
+    def add_species_to_plasma(self,species):
+        #adds a new species to the plasma
+        
+        # Chech if species is a string
+        if not isinstance(species, str):
+            raise ValueError("species must be a string")
+        
+        self.check_species_exist(species)
+        
+        self.list_of_species.append(species)
+        
+        self.give_mass_to_species(self.list_of_species)
+        self.give_charge_to_species(self.list_of_species)
+        self.give_Zcharge_to_species(self.list_of_species)
+        
+        #update ion species
+        self.set_ion_species()
                 
-    def set_density(self,species,n0,nedge,exponent):
+        if(self.lverb): print(f'Plasma updated and now has species: {", ".join(self.list_of_species)}')  
+                
+    def set_density(self,species,profile_type,n0=None,nedge=None,exponent=None,interpolating_func=None,rho_vals=None,n_vals=None):
+        # profile_type can be 'polynomial' or 'interp'
+        # if 'polynomial', then 'n0', 'nedge' and 'exponent' are required
+        # if 'interp', then 'interpolating_func' OR 'rho_vals' and 'n_vals' are required
+        
+        from scipy.interpolate import CubicSpline
         
         #check if species exist in list_of_species
         if species not in self.list_of_species:
@@ -98,16 +129,44 @@ class PLASMA:
         # Check if species exists in the dictionary, if not, create an empty dictionary for it
         if species not in self.density:
             self.density[species] = {}
-        
-        # Set the value for the specific location
-        profile_info = ['n0','nedge','exponent']
-        profile_vals = [n0,nedge,exponent]
+            
+        # Set profile type
+        match profile_type:
+            case 'polynomial':
+                if(n0 is None or nedge is None or exponent is None):
+                    print('ERROR: profile_type is polynomial and n0, nedge or exponent not provided')
+                    exit(0)
+                else:
+                    rho = np.linspace(0,1,100)
+                    interpolating_func = CubicSpline(rho,n0+(nedge-n0)*rho**exponent)
+                                    
+            case 'interp':
+                if(interpolating_func is None and (rho_vals is None or n_vals is None)):
+                    print('ERROR: profile_type is interp and interpolating_func OR rho_vals and n_vals not provided')
+                    exit(0)
+                # construct interpolating function from rho_vals and n_vals
+                if(interpolating_func is None):
+                    # check rho_vals are in the range [0,1]
+                    if( np.any((rho_vals<0) | (rho_vals>1))):
+                        print('ERROR: rho_vals must be in the domain [0,1]')
+                        exit(0)
+                    interpolating_func = CubicSpline(rho_vals,n_vals)
+                    
+            case _:
+                print(f'ERROR: profile_type is either polynomial or interp. Cannot be {profile_type}')
+                exit(0)
+                
+        profile_info = ['profile_type','interpolating_func']
+        profile_vals = [profile_type,interpolating_func]
         for info,val in zip(profile_info,profile_vals):
             self.density[species][info] = val
-            
-        print(f'\nDensity profile of {species}: n[m-3] = {nedge} + {n0-nedge}*(1-rho^{exponent})')
+                           
+    def set_temperature(self,species,profile_type,T0=None,Tedge=None,exponent=None,interpolating_func=None,rho_vals=None,T_vals=None):
+        # profile_type can be 'polynomial' or 'interp'
+        # if 'polynomial', then 'T0', 'Tedge' and 'exponent' are required
+        # if 'interp', then 'interpolating_func' OR 'rho_vals' and 'T_vals' are required
         
-    def set_temperature(self,species,T0,Tedge,exponent):
+        from scipy.interpolate import CubicSpline
         
         #check if species exist in list_of_species
         if species not in self.list_of_species:
@@ -117,30 +176,57 @@ class PLASMA:
         # Check if species exists in the dictionary, if not, create an empty dictionary for it
         if species not in self.temperature:
             self.temperature[species] = {}
-        
-        # Set the value for the specific location
-        profile_info = ['T0','Tedge','exponent']
-        profile_vals = [T0,Tedge,exponent]
+            
+        # Set profile type
+        match profile_type:
+            case 'polynomial':
+                if(T0 is None or Tedge is None or exponent is None):
+                    print('ERROR: profile_type is polynomial and T0, Tedge or exponent not provided')
+                    exit(0)
+                else:
+                    rho = np.linspace(0,1,100)
+                    interpolating_func = CubicSpline(rho,T0+(Tedge-T0)*rho**exponent)
+                                    
+            case 'interp':
+                if(interpolating_func is None and (rho_vals is None or T_vals is None)):
+                    print('ERROR: profile_type is interp and interpolating_func OR rho_vals and T_vals not provided')
+                    exit(0)
+                # construct interpolating function from rho_vals and T_vals
+                if(interpolating_func is None):
+                    # check rho_vals are in the range [0,1]
+                    if( np.any((rho_vals<0) | (rho_vals>1))):
+                        print('ERROR: rho_vals must be in the domain [0,1]')
+                        exit(0)
+                    interpolating_func = CubicSpline(rho_vals,T_vals)
+                    
+            case _:
+                print(f'ERROR: profile_type is either polynomial or interp. Cannot be {profile_type}')
+                exit(0)
+                
+        profile_info = ['profile_type','interpolating_func']
+        profile_vals = [profile_type,interpolating_func]
         for info,val in zip(profile_info,profile_vals):
             self.temperature[species][info] = val
-            
-        print(f'\nTemperature profile of {species}: T[eV] = {Tedge} + {T0-Tedge}*(1-rho^{exponent})')
     
     def get_density(self,species,rho):
         # rho can be a number or a list of numbers
         
-        #check if species exist in list_of_species
+        # check if species exist in list_of_species
         if species not in self.list_of_species:
             print(f"ERROR: Species {species} is not in the plasma.")
             exit(1)
-        
-        n0 = self.density[species]['n0']
-        nedge = self.density[species]['nedge']
-        exponent = self.density[species]['exponent']
-        
+            
+        # check if density of species has been set
+        if(species not in self.density):
+            print('ERROR" density of {species} has not been set yet')
+            exit(0)
+            
+        # make sure rho is an array
         rho = np.array(rho)
         
-        dens = nedge + (n0-nedge)*(1-rho**exponent)
+        dens_interp = self.density[species]['interpolating_func']
+        
+        dens = dens_interp(rho)
         
         return dens
     
@@ -153,33 +239,70 @@ class PLASMA:
             print(f"ERROR: Species {species} is not in the plasma.")
             exit(1)
         
-        n0 = self.density[species]['n0']
-        nedge = self.density[species]['nedge']
-        exponent = self.density[species]['exponent']
-        
+        # check if density of species has been set
+        if(species not in self.density):
+            print('ERROR" density of {species} has not been set yet')
+            exit(0)
+            
+        # make sure rho is an array
         rho = np.array(rho)
         
-        dens_der = (n0-nedge)*(-exponent*rho**(exponent-1))
+        dens_der_interp = self.density[species]['interpolating_func']
+        
+        dens_der = dens_der_interp(rho,1)
         
         return dens_der
     
     def get_temperature(self,species,rho):
         # rho can be a number or a list of numbers
         
-        #check if species exist in list_of_species
+        # check if species exist in list_of_species
         if species not in self.list_of_species:
             print(f"ERROR: Species {species} is not in the plasma.")
             exit(1)
-        
-        T0 = self.temperature[species]['T0']
-        Tedge = self.temperature[species]['Tedge']
-        exponent = self.temperature[species]['exponent']
-        
+            
+        # check if temperature of species has been set
+        if(species not in self.temperature):
+            print('ERROR" temperature of {species} has not been set yet')
+            exit(0)
+            
+        # make sure rho is an array
         rho = np.array(rho)
         
-        temp = Tedge + (T0-Tedge)*(1-rho**exponent)
+        temp_interp = self.temperature[species]['interpolating_func']
+        
+        temp = temp_interp(rho)
         
         return temp
+    
+    def get_pressure(self,species,rho):
+        # rho can be a number or a list of numbers
+        # returns pressure in SI [J.m^-3]
+        
+        # check if species exist in list_of_species
+        if species not in self.list_of_species:
+            print(f"ERROR: Species {species} is not in the plasma.")
+            exit(1)
+            
+        # check if density of species has been set
+        if(species not in self.density):
+            print('ERROR" density of {species} has not been set yet')
+            exit(0)
+            
+        # check if temperature of species has been set
+        if(species not in self.temperature):
+            print('ERROR" temperature of {species} has not been set yet')
+            exit(0)
+            
+        # make sure rho is an array
+        rho = np.array(rho)
+        
+        dens_interp = self.density[species]['interpolating_func']
+        temp_interp = self.temperature[species]['interpolating_func']
+        
+        pressure = dens_interp(rho) * temp_interp(rho) * EC
+        
+        return pressure
     
     def get_temperature_der(self,species,rho):
         # get derivative of temperature, dT/drho
@@ -190,15 +313,51 @@ class PLASMA:
             print(f"ERROR: Species {species} is not in the plasma.")
             exit(1)
         
-        T0 = self.temperature[species]['T0']
-        Tedge = self.temperature[species]['Tedge']
-        exponent = self.temperature[species]['exponent']
-        
+        # check if density of species has been set
+        if(species not in self.temperature):
+            print('ERROR: temperature of {species} has not been set yet')
+            exit(0)
+            
+        # make sure rho is an array
         rho = np.array(rho)
         
-        temp_der = (T0-Tedge)*(-exponent*rho**(exponent-1))
+        temp_der_interp = self.temperature[species]['interpolating_func']
+        
+        temp_der = temp_der_interp(rho,1)
         
         return temp_der
+    
+    def get_pressure_der(self,species,rho):
+        # rho can be a number or a list of numbers
+        # pressure is in SI [J.m^-3]
+        
+        # check if species exist in list_of_species
+        if species not in self.list_of_species:
+            print(f"ERROR: Species {species} is not in the plasma.")
+            exit(1)
+            
+        # check if density of species has been set
+        if(species not in self.density):
+            print('ERROR" density of {species} has not been set yet')
+            exit(0)
+            
+        # check if temperature of species has been set
+        if(species not in self.temperature):
+            print('ERROR" temperature of {species} has not been set yet')
+            exit(0)
+            
+        # make sure rho is an array
+        rho = np.array(rho)
+        
+        dens_interp = self.density[species]['interpolating_func']
+        temp_interp = self.temperature[species]['interpolating_func']
+        
+        temp_der = temp_interp(rho,1)
+        dens_der = dens_interp(rho,1)
+        
+        press_der = dens_interp(rho)*temp_der +  dens_der*temp_interp(rho)
+        
+        return press_der*EC
     
     def get_thermal_speed(self,species,rho):
         
@@ -208,7 +367,7 @@ class PLASMA:
         return vth
     
     def get_averaged_profile(self,species,which_profile,dVdrho):
-        # which profile is either 'density' or 'temperature'
+        # which profile is either 'density', 'temperature' or 'pressure'
         # dVdrho is a function
         
         from scipy.integrate import trapezoid
@@ -219,6 +378,8 @@ class PLASMA:
             profile = self.get_density(species,rho)
         elif(which_profile=='temperature'):
             profile = self.get_temperature(species,rho)
+        elif(which_profile=='pressure'):
+            profile = self.get_density(species,rho)*self.get_temperature(species,rho)*EC   #Pascal (SI) units
         else:
             print(f'ERROR: profile is either "density" or "temperature". Cannot be {which_profile}')
             exit(0)
@@ -237,7 +398,7 @@ class PLASMA:
         # vtest and rho must have the same size
         # if vtest is not provided, it is assumed that vtest=vth
         
-        from collisions import COLLISIONS
+        from libstell.collisions import COLLISIONS
 
         coll = COLLISIONS()
         
@@ -307,10 +468,74 @@ class PLASMA:
         # ion species in the order that appears in list_of_species
         self.ion_species = [species for species in self.list_of_species if species != 'electrons']
         
-        print(f'Ion species: {self.ion_species}')
+        if(self.lverb): print(f'Ion species: {self.ion_species}')
         
         self.num_ion_species = len(self.ion_species)
         
+    def get_plasma_total_beta(self,B,dVdrho):
+        # calculates plasma beta=total_pressure/ (B^2/2mu0)
+        
+        total_avg_pressure = 0.0
+        for species in self.list_of_species:
+            total_avg_pressure += self.get_averaged_profile(species,'pressure',dVdrho)
+        
+        betatot = total_avg_pressure / (B*B/(2*MU0))
+        
+        # print(f'betatot={betatot*100:.2f}%')
+        
+        return betatot 
+    
+    def get_plasma_beta_averaged(self,VMEC_class):
+        
+        Bsq = VMEC_class.bdotb.flatten()
+        vp = VMEC_class.vp[:].flatten()
+        roa = np.sqrt(VMEC_class.phi / VMEC_class.phi[-1])
+        roa = roa.flatten()
+        
+        dVdrho = (2*np.pi)**2 * vp * 2.*roa
+        
+        total_press = 0.0
+        for species in self.list_of_species:
+            total_press += self.get_density(species,roa)*self.get_temperature(species,roa)*EC   #Pascal (SI) units
+        
+        volume = np.trapz(dVdrho,roa)
+        beta_avg = np.trapz(total_press/Bsq * dVdrho,roa) / volume
+        
+        beta_averaged = 2*MU0 * beta_avg
+        
+        return beta_averaged  
+    
+    def get_Spitzer_resistivity(self,rho=None,make_plot=False):
+        
+        import matplotlib.pyplot as plt
+        
+        if(rho is None):
+            rho = np.linspace(0,1,100)
+        
+        Te = self.get_temperature('electrons',rho)
+        ne = self.get_density('electrons',rho)
+        
+        log_lambda_e = 31.3 - np.log(np.sqrt(ne)/Te)
+        
+        Z = np.max([self.Zcharge[species] for species in self.list_of_species])
+        
+        N_Z = 0.58 + 0.74/(0.76+Z)
+        
+        # from Sauter PoP 6 (1999)
+        sigma_Spitzer = 1.9012E4 * Te**1.5 / (Z*N_Z*log_lambda_e)
+        eta_Spitzer = 1 / sigma_Spitzer
+        
+        if make_plot:
+            plt.rc('font', size=18)
+            _, ax = plt.subplots(figsize=(11,8))
+            ax.plot(rho,eta_Spitzer)
+            ax.set_xlabel('r/a')
+            ax.set_ylabel(r'$\eta_{\parallel}~[\Omega\,$m]')
+            ax.set_title('Spitzer Resistivity')
+            ax.grid()
+            plt.show()
+        
+        return eta_Spitzer      
     
     def write_plasma_profiles_to_PENTA1(self,rho,filename=None):
         # first line: number of rhos
@@ -351,7 +576,7 @@ class PLASMA:
                 # Write the row to the file, formatted as space-separated values
                 file.write(" ".join(map(str, row_data)) + '\n')
     
-    def write_plasma_profiles_to_PENTA3(self,rho,filename=None):
+    def write_plasma_profiles_to_PENTA3(self,rho=np.linspace(0,1,200),filename=None):
         # first line: number of rhos
         # from second line: 
         # 1st column: rho=r/a
@@ -484,6 +709,113 @@ class PLASMA:
         
         print(f'{filename} created with success!')
         
+    def plot_nustar(self,R0=1.0,iota=1.0,make_plot=True):
+        # plots nu_star = (nu(vth)/vth)*() as a function of 
+        
+        import matplotlib.pyplot as plt
+        
+        plt.rc('font', size=18)
+        
+        roa = np.linspace(0,1,100)
+        
+        _, ax = plt.subplots(figsize=(11,8))
+
+        nu_star_species = {}
+        for species in self.list_of_species:
+            vth = self.get_thermal_speed(species,roa)
+            nu = self.get_collisionality(species,roa,vtest=vth)
+            
+            nu_star = (nu/vth)*(R0/iota) 
+            
+            ax.plot(roa,nu_star,'-',label=f'{species}')
+            
+            nu_star_species[species] = nu_star
+        
+        ax.grid()
+        ax.set_xlabel('r/a')
+        ax.set_ylabel(r'$\nu^*$')
+        ax.set_yscale('log')
+        ax.set_title(r'plasma collisionality $\nu^*=(\nu/v_{th})(R_0/\iota)$')
+        plt.legend()
+        if(make_plot):
+            plt.show()
+        else:
+            plt.close()
+        
+        return roa,nu_star_species
+    
+    def plot_density(self,*species):
+        # plots density profile
+        
+        import matplotlib.pyplot as plt
+        
+        rho = np.linspace(0,1,100)
+
+        _, ax = plt.subplots(figsize=(11,8))
+        for s in species:
+            #check if species exist in list_of_species
+            if s not in self.list_of_species:
+                print(f"ERROR: Species {species} is not in the plasma.")
+                exit(1)
+            ax.plot(rho,self.get_density(s,rho)/1E20,'.-',label=f'{s}')
+        ax.set_xlabel('r/a')
+        ax.set_ylabel(r'$n~(\times 10^{20})~\text{m}^{-3}$')
+        ax.set_title(f'density')
+        ax.grid()
+        plt.legend()
+        plt.show()
+        
+    def plot_temperature(self,*species):
+        # plots temperature profile
+        
+        import matplotlib.pyplot as plt
+        
+        rho = np.linspace(0,1,100)
+
+        _, ax = plt.subplots(figsize=(11,8))
+        for s in species:
+            #check if species exist in list_of_species
+            if s not in self.list_of_species:
+                print(f"ERROR: Species {species} is not in the plasma.")
+                exit(1)
+            ax.plot(rho,self.get_temperature(s,rho)/1E3,'.-',label=f'{s}')
+        ax.set_xlabel('r/a')
+        ax.set_ylabel('T [keV]')
+        ax.set_title(f'temperature')
+        ax.grid()
+        plt.legend()
+        plt.show()
+        
+    def get_gyroBohm_diffusivity(self,species,B,aminor,rho=None,make_plot=False):
+        # plots gyro-Bohm diffusivity = ... for all ions in the plasma
+        
+        import matplotlib.pyplot as plt
+        
+        if(rho is None):
+            rho = np.linspace(0,1,100)
+            
+        mi = self.mass[species]
+        qi = self.charge[species]
+        
+        # Te = self.get_temperature('electrons',rho)
+        Ti = self.get_temperature(species,rho)
+        
+        # chi_gB = (EC*Te/mi)**1.5 * mi*mi / (qi**2 * B**2) / aminor
+        chi_gB = (EC*Ti/mi)**1.5 * mi*mi / (qi**2 * B**2) / aminor
+        
+        if(make_plot):
+            _, ax = plt.subplots(figsize=(11,8))
+            ax.plot(rho,chi_gB,label=species,linewidth=4)
+            ax.set_xlabel('r/a')
+            ax.set_ylabel(r'$\chi_{\mathrm{gB}}$ [m$^2/$s]')
+            ax.set_title(f'{species} gyro-Bohm diffusivity  |  B={B}T, a={aminor}m')
+            ax.grid()
+            plt.legend()
+            plt.show()
+        
+        return chi_gB
+                        
+        
     def get_pressure_polynomial_coefficients(self,deg_fit=10):
         # this computes the AM coefficients and the PRES_SCALE scalar for a VMEC input
         # assuming that PMASS_TYPE = 'power_series'
@@ -540,77 +872,9 @@ class PLASMA:
         print(f'AM_AUX_S = {s_VMEC}')
         print(f'AM_AUX_F = {pres}')
         
-        return AM,PRES_SCALE
-
+        return AM,PRES_SCALE       
         
-    def print_SFINCS_namelist(self,roa):
-        # prints in the command line physics and species parameters namelist of for SFINCS
-        
-        n_species = np.array( [self.get_density(species,rho=roa) for species in self.list_of_species] )
-        T_species = np.array( [self.get_temperature(species,rho=roa) for species in self.list_of_species] )
-        m_species = np.array( [self.mass[species] for species in self.list_of_species] )
-        Z_species = np.array( [self.Zcharge[species] for species in self.list_of_species] )
-        
-        nder_species = np.array( [self.get_density_der(species,rho=roa) for species in self.list_of_species] )
-        Tder_species = np.array( [self.get_temperature_der(species,rho=roa) for species in self.list_of_species] )
-
-        ## reference values
-        nBar = np.max(n_species) # pick largest value. must be in m^-3
-        mBar = MP # must be in kg 
-        TBar = np.max(T_species) # must be in eV
-        
-        vBar = np.sqrt(2*TBar*EC/mBar)
-        
-        print(f'nBar = {nBar}')
-        print(f'vBar = {vBar}')
-        
-        # mandatory values -- these values (BBar=1 and RBar=1) are mandatory when mag field is read from VMEC wout file (see SFINCS documentation)
-        BBar = 1.0
-        RBar = 1.0
-        
-        # print(f'jbs.B = {-1.2e-4*EC*nBar*vBar*BBar}')
-        
-        # compute loglambda as in PENTA
-        Te = self.get_temperature('electrons',rho=roa)
-        ne = self.get_density('electrons',rho=roa)
-        if(Te>50):
-            loglambda = 25.3 - 1.15*np.log10(ne/1e6) + 2.3*np.log10(Te)
-        else:
-            loglambda = 23.4 - 1.15*np.log10(ne/1e6) + 3.45*np.log10(Te)
-        
-        nuHat = 4*np.sqrt(2*np.pi)*nBar*EC**4*loglambda / ( 3*(4*np.pi*EPS0)**2 * np.sqrt(mBar) * (EC*TBar)**1.5 )
-        
-        # compute physics parameters
-        Delta = mBar*vBar / (EC*BBar*RBar)
-        alpha = 1.0
-        nu_n = nuHat * RBar/vBar
-        
-        mHats = m_species/mBar
-        nHats = n_species/nBar
-        THats = T_species/TBar
-        dNHatdrNs = nder_species/nBar
-        dTHatdrNs = Tder_species/TBar
-        
-        # print output
-        
-        print('&speciesParameters')
-        print(f"Zs = {' '.join(map(str, Z_species))}")
-        print(f"mHats = {' '.join(map(str, mHats))}")
-        print(f"nHats = {' '.join(map(str, nHats))}")
-        print(f"THats = {' '.join(map(str, THats))}")
-        print(f"dNHatdrNs = {' '.join(map(str, dNHatdrNs))}")
-        print(f"dTHatdrNs = {' '.join(map(str, dTHatdrNs))}")
-        print('/')
-
-        print('&physicsParameters')
-        print(f'Delta = {Delta}')
-        print(f'alpha = {alpha}')
-        print(f'nu_n = {nu_n}')
-
-        print('dont forget the rest of the parameters...')
-        
-        
-    def print_SFINCS_list_namelist(self,roa_list,folder_path):
+    def print_SFINCS_list_namelist(self,roa_list,folder_path,wout_file):
         # saves input.namlist inside folder_path/surface_k
         
         import os
@@ -628,8 +892,8 @@ class PLASMA:
         
         for k,roa in enumerate(roa_list):
             
-            folder_name = f'surface_{k+1}'  # Folders will be surface_1, surface_2, etc.
-            os.makedirs(folder_path+'/'+folder_name, exist_ok=True)
+            # folder_name = f'surface_{k+1}'  # Folders will be surface_1, surface_2, etc.
+            # os.makedirs(folder_path+'/'+folder_name, exist_ok=True)
         
             n_species = np.array( [self.get_density(species,rho=roa) for species in self.list_of_species] )
             T_species = np.array( [self.get_temperature(species,rho=roa) for species in self.list_of_species] )
@@ -678,7 +942,7 @@ rN_wish = {roa}
 inputRadialCoordinateForGradients = 3   !the radial coordinate of the gradients given in species parameters is rN=sqrt(PHI/PHIEDGE)
 
 VMECRadialOption = 1  !get the nearest available flux surface from VMEC HALF grid 
-equilibriumFile = "wout_beta_2.nc"
+equilibriumFile = "{wout_file}"
 min_Bmn_to_load = 1e-4
 /
 
@@ -710,8 +974,8 @@ magneticDriftScheme = 1  ! this includes poloidal and toroidal magnetic drifts
 /
 
 &resolutionParameters
-Ntheta = 23 ! needs to be an odd number
-Nzeta = 91 ! needs to be an odd number and at low collisionality might be needeed to be of the order 100 to converge
+Ntheta = 33 ! needs to be an odd number
+Nzeta = 101 ! needs to be an odd number and at low collisionality might be needeed to be of the order 100 to converge
 
 Nxi = 70
 Nx = 6
@@ -731,15 +995,14 @@ solverTolerance = 1d-6
 """
             
              # Define the file path
-            file_path = os.path.join(folder_path+'/'+folder_name, 'input.namelist')
+            file_path = os.path.join(folder_path+'/'+f'input.namelist_{k+1}')
             
             # Write the content to the file
             with open(file_path, 'w') as f:
                 f.write(file_content)
 
             print(f"Created {file_path}")
-        
-
+            
 # Main routine
 if __name__=="__main__":
 	import sys

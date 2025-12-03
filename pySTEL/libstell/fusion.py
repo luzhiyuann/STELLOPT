@@ -130,7 +130,67 @@ class FUSION():
 	def calcFusion(self):
 		"""
 		"""
+  
+	def BremsstrahlungPower(self,Zi,ni,ne,Te):
+		"""Computes the Bremsstrahlung irradiated power of an electron
+		desaccelerated by a given ion
 
+		This routine computes the Bremsstrahlung irradiated power density
+		according to Freidberg's Plasma Physics and Fusion Energy, 
+		page 56, Eq. (3.42)
+
+		Parameters
+		----------
+		Zi : integer
+		Charge number of the ion
+		ni : real
+		Ion density [m^-3]
+		ne : real
+		Electron density [m^-3]
+		Te : real
+		Electron temperature [eV]
+		Returns
+		----------
+		SB : real
+		Bremmstrahlung power density [W/m^3]
+		"""
+		import numpy as np
+  
+		CB = 5.35e3
+		n20 = ne / 1e20
+		Tk = Te / 1e3
+  
+		Zeff = Zi*Zi * ni/ne
+  
+		SB = CB * Zeff * n20**2 * np.sqrt(Tk) # W/m^3
+        
+		return SB     
+
+	def alphaPower(self,n_D,n_T,T_D,T_T):
+		"""Computes the alpha power-density
+
+		Parameters
+  		----------
+		n_D : real
+		Deuterium density [m^-3]
+		n_T : real
+		Tritium density [m^-3]
+		T_D : real
+  		Deuterium temperature [eV]
+		T_T : real
+		Tritium temperature [eV]
+  		Returns
+  		----------
+		S_alpha : real
+		Alpha power density [W/m^3]
+		"""
+
+		Ti = 0.5 * (T_D+T_T)
+		sigmav = self.sigmaBH(Ti,'DT') # m^3/s
+		E_alpha = self.E_DT_He   # J
+		S_alpha = n_D * n_T * sigmav * E_alpha # W/m^3
+		
+		return S_alpha
 
 if __name__=="__main__":
 	import sys

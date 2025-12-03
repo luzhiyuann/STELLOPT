@@ -101,6 +101,9 @@ class COILSET():
 				y = self.groups[i].coils[j].y
 				z = self.groups[i].coils[j].z
 				s = np.linspace(0.0,1.0,self.groups[i].coils[j].npts)
+				x[-1] = x[0]
+				y[-1] = y[0]
+				z[-1] = z[0]
 				cx = CubicSpline(s,x,bc_type='periodic')
 				cy = CubicSpline(s,y,bc_type='periodic')
 				cz = CubicSpline(s,z,bc_type='periodic')
@@ -149,7 +152,7 @@ class COILSET():
 		# Render if requested
 		if lplotnow: plt.render()
 
-	def plotcoilsHalfFP(self,plot3D=None):
+	def plotcoilsHalfFP(self,plot3D=None,color=None):
 		"""Plots a half field period of a coilset in 3D using VTK
 
 		This routine plots a half field period of a coilset in 3D using VTK
@@ -158,6 +161,8 @@ class COILSET():
 		----------
 		plot3D : plot3D object (optional)
 			Plotting object to render to.
+		color : list (optional)
+			List of colors to plot coils.
 		"""
 		import numpy as np
 		import vtk
@@ -170,26 +175,34 @@ class COILSET():
 			lplotnow = True
 			plt = PLOT3D()
 		# Setup color array
-		color_txt=['red','green','blue','yellow','magenta','cyan','aqua']
+		if color:
+			color_txt=color
+		else:
+			color_txt=['red','green','blue','yellow','magenta','cyan','aqua']
 		# Plot coils
 		for i in range(self.ngroups):
-			j=0
-			points_array = np.zeros((self.groups[i].coils[j].npts,3))
-			points_array[:,0] =self.groups[i].coils[j].x
-			points_array[:,1] =self.groups[i].coils[j].y
-			points_array[:,2] =self.groups[i].coils[j].z
-			# Convert numpy array to VTK points
-			points = vtk.vtkPoints()
-			for point in points_array:
-				points.InsertNextPoint(point)
-			# Add to render
-			plt.add3Dline(points,color=color_txt[i % len(color_txt)],linewidth=5)
+			nfilaments = int(self.groups[i].ncoils/(2*self.nfp))
+			for j in range(nfilaments):
+				points_array = np.zeros((self.groups[i].coils[j].npts,3))
+				points_array[:,0] =self.groups[i].coils[j].x
+				points_array[:,1] =self.groups[i].coils[j].y
+				points_array[:,2] =self.groups[i].coils[j].z
+				# Convert numpy array to VTK points
+				points = vtk.vtkPoints()
+				for point in points_array:
+					points.InsertNextPoint(point)
+				# Add to render
+				if type(color) is type(None):
+					plot_color = color_txt[i % len(color_txt)]
+				else:
+					plot_color = color
+				plt.add3Dline(points,color=plot_color,linewidth=5)
 		# In case it isn't set by user.
 		plt.setBGcolor()
 		# Render if requested
 		if lplotnow: plt.render()
 
-	def plotcoilplasmaDist(self,plot3D=None):
+	def plotcoilplasmaDist(self,plot3D=None,cmin=None):
 		"""Plots coil with coil-plasma distance
 
 		This routine plots a half field period of a coilset in 3D using
@@ -199,6 +212,8 @@ class COILSET():
 		----------
 		plot3D : plot3D object (optional)
 			Plotting object to render to.
+		cmin : float (optional)
+			Minimum value of color scale.
 		"""
 		import numpy as np
 		import vtk
@@ -211,11 +226,17 @@ class COILSET():
 			lplotnow = True
 			plt = PLOT3D()
 		# Get the min and max values
-		cmin = 1E20; cmax=-1E20;
+		cmax=-1E20; lsetred=False
+		if type(cmin) == type(None):
+			cmin = 1E20
+			for i in range(self.ngroups):
+				j = 0
+				cmin = min(cmin,min(self.groups[i].coils[j].dist_surf)) 
+		else:
+			lsetred=True
 		for i in range(self.ngroups):
 			j = 0
-			cmin = min(cmin,min(self.groups[i].coils[j].dist_surf)) 
-			cmax = max(cmin,max(self.groups[i].coils[j].dist_surf)) 
+			cmax = max(cmax,max(self.groups[i].coils[j].dist_surf)) 
 		# Plot coils
 		for i in range(self.ngroups):
 			j=0
@@ -232,6 +253,8 @@ class COILSET():
 				points.InsertNextPoint(point)
 			# Add to render
 			plt.add3Dline(points,scalars=scalar,linewidth=5)
+			# Add red to colortable
+			if lsetred: plt.setLUTRed()
 		# Set color limits
 		plt.setClim(cmin,cmax)
 		# In case it isn't set by user.
@@ -322,6 +345,38 @@ class COILSET():
 			self.color_cycle.rotate(1)
 			c_temp = self.color_cycle[0]
 
+	def scalecoilsRZ(self,dist):
+		"""Rescales the coils about their centroid
+
+		This routine rescales a coil about its centroid by pushing the
+		coil radially outwards by an amount dist.
+
+		Parameters
+		----------
+		dist : float
+			Distance to push coil.
+		"""
+		for i in range(self.ngroups):
+			for j in range(self.groups[i].ncoils):
+				x = self.groups[i].coils[j].x
+				y = self.groups[i].coils[j].y
+				z = self.groups[i].coils[j].z
+				r = np.sqrt(x*x+y*y)
+				r0 = np.mean(r)
+				z0 = np.mean(z)
+				r1 = r - r0
+				z1 = z - z0
+				rho = np.sqrt(r1*r1+z1*z1)
+				#theta = np.arctan2(z1,r1)
+				rho2 = rho + factor
+				r2 = r0 + rho2 * r1 / rho
+				z2 = z0 + rho2 * z1 / rho
+				x2 = r2 * x / r
+				y2 = r2 * y / r
+				self.groups[i].coils[j].x = x2
+				self.groups[i].coils[j].y = y2
+				self.groups[i].coils[j].z = z2
+
 	def write_coils_file(self,filename):
 		"""Writes a coils file
 
@@ -346,6 +401,7 @@ class COILSET():
 					f.write(f"{self.groups[i].coils[j].x[k]:.10E} {self.groups[i].coils[j].y[k]:.10E} {self.groups[i].coils[j].z[k]:.10E} {current[k]:.10E}\n")
 				k = self.groups[i].coils[j].npts-1
 				f.write(f"{self.groups[i].coils[j].x[k]:.10E} {self.groups[i].coils[j].y[k]:.10E} {self.groups[i].coils[j].z[k]:.10E} {current[k]:.10E} {i+1} {self.groups[i].name}\n")
+		f.write(f"end\n")
 		f.close()
 
 	def coilbiot(self,x,y,z,extcur=None):
@@ -857,6 +913,91 @@ class COILSET():
 				l = l + 4
 		return vertices,faces
 
+	def write_coils_STL(self,filename='coil.stl',width=0.2,height=0.2,lfield_period=False,thickness=0.0):
+		"""Writes a coils file to an STL as a solid coil
+
+		This routine creates a solid coil and then writes it out as a
+		STL file. The lfield_period option allows the user to specify
+		that only one field period of the model should be output.
+		If the thickness option is set, then two models will be
+		generated with one being a shell around the actual coil. In
+		this case width and height are the total case size and the
+		coil itself has a width and height with the thickness
+		subtracted.
+
+		Parameters
+		----------
+		filename : str (optional)
+			Path to coils file. (default: coils.stl)
+		width : float (optional)
+			Finite build coil width [m] (default: 0.2)
+		height : float (optional)
+			Finite build coil height [m] (default: 0.2)
+		lfield_period : boolean (optional)
+			Return coilset over one field period (default: False)
+		thickness : float (optional)
+			Coil thickness for shell model (default: 0.0)
+		"""
+		import numpy as np
+		from stl import mesh
+		coil_width  = float(width)  - float(thickness)
+		coil_height = float(height) - float(thickness)
+		[vertex,faces] = self.blenderCoil(height=coil_height,
+			width=coil_width,lfield_period=lfield_period)
+		vertex = np.array(vertex)
+		faces  = np.array(faces, dtype=int)
+		nfaces = faces.shape[0]
+		coil_mesh = mesh.Mesh(np.zeros(nfaces, dtype=mesh.Mesh.dtype))
+		for i, f in enumerate(faces):
+			for j in range(3):
+				coil_mesh.vectors[i][j] = vertex[f[j],:]
+		coil_mesh.save(filename)
+		if thickness > 0.0:
+			# Reverse order of inner face to get proper surface normals
+			faces = faces[:,[2,1,0]]
+			[vertex_case,faces_case] = self.blenderCoil(height=float(height),
+				width=float(width),lfield_period=lfield_period)
+			vertex_case = np.array(vertex_case)
+			faces = faces + vertex_case.shape[0]
+			faces_case  = np.array(faces_case, dtype=int)
+			print(vertex_case.shape,vertex.shape)
+			vertex_case = np.concatenate((vertex_case,vertex),axis=0)
+			faces_case = np.concatenate((faces_case,faces),axis=0)
+			nfaces_case = faces_case.shape[0]
+			coil_mesh = mesh.Mesh(np.zeros(nfaces_case, dtype=mesh.Mesh.dtype))
+			for i, f in enumerate(faces_case):
+				for j in range(3):
+					coil_mesh.vectors[i][j] = vertex_case[f[j],:]
+			coil_mesh.save('coilcase_'+filename)
+
+	def write_Gourdon_coils(self):
+		"""Write Gourdon style coils files
+
+		This routine writes Gourdon style coils files as used in the
+		Gourdon fieldline tracer and codes such as EMC3-LITE.
+		"""
+		for i in range(self.ngroups):
+			nfp = max(min(self.groups[i].ncoils/2,self.nfp),1)
+			self.groups[i].coils[0].writeGourdonCoil(filename=self.groups[i].name,nfp=nfp)
+
+	def reverse(self):
+		"""Reverse the winding of an entire coil
+
+		This routine reverses the order in which a coil is wound
+
+		"""
+		for j in range(self.ngroups):
+			self.groups[j].reverse()
+
+	def flip(self):
+		"""Flip an entire coil toroidally
+
+		This routine reverses the toroidal direction of the coil
+
+		"""
+		for j in range(self.ngroups):
+			self.groups[j].flip()
+
 class COILGROUP():
 	"""Class which defines a coil group
 
@@ -878,6 +1019,24 @@ class COILGROUP():
 			else:
 				self.coils.extend([COIL(x[i:j+1],y[i:j+1],z[i:j+1])])
 			i = j+1
+
+	def reverse(self):
+		"""Reverse the winding of an entire coilgroup
+
+		This routine reverses the order in which a coil is wound
+
+		"""
+		for j in range(self.ncoils):
+			self.coils[j].reverse()
+
+	def flip(self):
+		"""Flip a coilgroup toroidally
+
+		This routine reverses the toroidal direction of the coil
+
+		"""
+		for j in range(self.ncoils):
+			self.coils[j].flip()
 
 class COIL():
 	"""Class which defines a coil
@@ -1142,6 +1301,28 @@ class COIL():
 			xn = xn - nt * xt
 			yn = yn - nt * yt
 			zn = zn - nt * zt
+		if frame == "centroid_rz":
+			# Use the centroid but keep face perpendicular
+			r  = np.sqrt(self.x**2+self.y**2)
+			[center_x,center_y,center_z]=self.geomCenter()
+			center_p = np.arctan2(center_y,center_x)
+			center_r = np.sqrt(center_x**2+center_y**2)
+			rn = r - center_r
+			zn = self.z - center_z
+			xb = yt*zn - zt*yn
+			yb = zt*xn - xt*zn
+			zb = xt*yn - yt*xn
+			xn = yt*zb - zt*yb
+			yn = zt*xb - xt*zb
+			zn = xt*yb - yt*xb
+		if frame == "phi":
+			# The normal direction is simply the phi direction.
+			[center_x,center_y,center_z]=self.geomCenter()
+			xn = np.zeros_like(self.x)
+			yn = np.zeros_like(self.y)
+			zn = np.zeros_like(self.z)
+			xn[:] = -center_y
+			yn[:] = center_x
 		if frame == "centroid_cyl":
 			# use the geometry center but define in cylindrical coords
 			[center_x,center_y,center_z]=self.geomCenter()
@@ -1278,6 +1459,96 @@ class COIL():
 			# Add to total curve
 			print('test')
 
+	def writeGourdonCoil(self,filename,nfp):
+		"""Write a single coil in Gourdon Format
+
+		This routine outputs the single coil into a text file which
+		the Gourdon field line tracer can use. This format is also
+		required for the EMC3-LITE code. For coils with multiple
+		field periodicity we need to write both the coil and it's
+		stellarator symmetric variant.
+
+		Parameters
+		----------
+		filename : string
+			Name of file to output coil into
+		nfp : int
+			Periodicity of the coil system
+		"""
+		import numpy as np
+		filename_out = filename
+		if nfp > 1:
+			filename_out = 'hm11_'+filename
+		else:
+			filename_out = filename
+		# First write the first field period coil
+		f = open(filename_out,'w')
+		f.write(f"{self.npts} {int(nfp)}\n")
+		for i in range(self.npts):
+			f.write(f"{self.x[i]:.10E} {self.y[i]:.10E} {self.z[i]:.10E}\n")
+		f.close()
+		# Create the half field period mirror coil
+		if nfp > 1:
+			filename_out = 'hm10_'+filename
+			f = open(filename_out,'w')
+			f.write(f"{self.npts} {int(nfp)}\n")
+			r = np.sqrt(self.x*self.x+self.y*self.y)
+			p = -np.arctan2(self.y,self.x)
+			x = r * np.cos(p)
+			y = r * np.sin(p)
+			z = -self.z
+			# Since we flip z we flip order of the points
+			for i in range(self.npts-1,-1,-1):
+				f.write(f"{x[i]:.10E} {y[i]:.10E} {z[i]:.10E}\n")
+			f.close()
+
+	def reverse(self):
+		"""Reverse the winding of a coil
+
+		This routine reverses the order in which a coil is wound
+
+		"""
+		self.x = self.x[::-1]
+		self.y = self.y[::-1]
+		self.z = self.z[::-1]
+
+	def flip(self):
+		"""Flip a coil toroidally
+
+		This routine reverses the toroidal direction of the coil
+
+		"""
+		import numpy as np
+		r = np.sqrt(self.x*self.x+self.y*self.y)
+		p = np.arctan2(self.y,self.x)
+		z = self.z
+		self.x = r*np.cos(-p)
+		self.y = r*np.sin(-p)
+
+	def mirror(self,nfp):
+		"""Mirror a coil about the half field period
+
+		This routine mirrors a coil about the half field period
+
+		Parameters
+		----------
+		nfp : int
+			Field periodicity
+
+		Returns
+		----------
+		flip_coil : coil
+		"""
+		import numpy as np
+		zeta = np.pi/float(nfp)
+		r = np.sqrt(self.x*self.x+self.y*self.y)
+		p = np.arctan2(self.y,self.x)
+		z = self.z
+		p = np.pi/float(nfp) - p
+		z = -z
+		flip_coil = COIL(x,y,z)
+		flip_coil.reverse()
+		return flip_coil
 
 if __name__=="__main__":
 	import sys

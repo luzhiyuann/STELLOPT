@@ -74,6 +74,7 @@ class FIELDLINES():
 		for i in range(self.nr):
 			self.B_R[i,:,:] = self.B_R[i,:,:]*self.B_PHI[i,:,:]/self.raxis[i]
 			self.B_Z[i,:,:] = self.B_Z[i,:,:]*self.B_PHI[i,:,:]/self.raxis[i]
+		# Adjust wall faces to python indexing
 		if hasattr(self,'wall_faces'): self.wall_faces = self.wall_faces - 1
 
 	def calc_reff(self):
@@ -146,10 +147,10 @@ class FIELDLINES():
 		A number of fieldlines to skip can also be provided (nskip).
 		The user may also provide an axes (ax) to plot to.
 
-		Returns
+		Parameters
 		----------
 		phi : float
-			Toroidal angle to plot. [radians]
+			Toroidal index to plot. [radians]
 		nskip : int (optional)
 			Number of fieldlines to skip.
 		ax : axes (optional)
@@ -164,7 +165,7 @@ class FIELDLINES():
 			lplotnow = True
 		if color_data is not None:
 			lcdata = True
-		k = int(self.npoinc*phi/self.phiaxis[-1])
+		k = int(np.round(self.npoinc*phi/self.phiaxis[-1]))
 		rmin = np.amin(self.raxis)
 		rmax = np.amax(self.raxis)
 		x = self.R_lines[0:self.nlines:nskip,k:self.nsteps-1:self.npoinc]
@@ -174,9 +175,17 @@ class FIELDLINES():
 			ax.scatter(x,y,s=0.1,c=c,marker='.')
 		else:
 			ax.plot(x,y,'.k',markersize=0.1)
+		# Add the hc
+		if hasattr(self,'Rhc_lines'):
+			nlines_hc = self.Rhc_lines.shape[0]
+			nsteps_hc = self.Rhc_lines.shape[1]
+			x = self.Rhc_lines[0:nlines_hc,k:nsteps_hc-1:self.npoinc]
+			y = self.Zhc_lines[0:nlines_hc,k:nsteps_hc-1:self.npoinc]
+			ax.plot(x,y,'.r',markersize=0.1)
+			ax.plot(self.Rhc_lines[0,k],self.Zhc_lines[0,k],'+r')
 		ax.set_xlabel('R [m]')
 		ax.set_ylabel('Z [m]')
-		ax.set_title(rf'FIELDLINES $\phi$ = {np.rad2deg(phi):3.1f}')
+		ax.set_title(rf'FIELDLINES $\phi$ = {np.rad2deg(self.PHI_lines[0,k]):3.1f}')
 		ax.set_aspect('equal')
 		ax.set_xlim(rmin,rmax)
 		if lplotnow: pyplot.show()
@@ -188,6 +197,12 @@ class FIELDLINES():
 
 		Parameters
 		----------
+		k : int
+			Field line index to plot.
+		pointsize : float (optional)
+			Size of points (default=0.01)
+		color : string (optional)
+			Dot color (default='red')
 		plot3D : plot3D object (optional)
 			Plotting object to render to.
 		"""
@@ -216,13 +231,61 @@ class FIELDLINES():
 			# Colorbar
 			plt.colorbar()
 		else:
-			plt.add3Dpoints(points,pointsize=pointsize)
+			plt.add3Dpoints(points,pointsize=pointsize,color=color)
 		# In case it isn't set by user.
 		plt.setBGcolor()
 		# Render if requested
 		if lplotnow: plt.render()
 
-	def plot_poincare3D(self,k=0,pointsize=0.01,color='red',plot3D=None):
+	def plot_index3d(self,k,pointsize=0.01,color='red',plot3D=None):
+		"""Plots the FIELDILNES Points in 3D (by index)
+
+		This routine plots the FIELDLINES poincare points in 3D by
+		the index
+
+		Parameters
+		----------
+		k : int
+			Poincare index to plot.
+		pointsize : float (optional)
+			Size of points (default=0.01)
+		color : string (optional)
+			Dot color (default='red')
+		plot3D : plot3D object (optional)
+			Plotting object to render to.
+		"""
+		import numpy as np
+		import vtk
+		from libstell.plot3D import PLOT3D
+		# Handle optionals
+		if plot3D: 
+			lplotnow=False
+			plt = plot3D
+		else:
+			lplotnow = True
+			plt = PLOT3D()
+		vertices = []
+		scalar   = []
+		for i in range(self.nlines):
+			if (self.R_lines[i,k] > 0):
+				vertices.append([self.X_lines[i,k],self.Y_lines[i,k],self.Z_lines[i,k]])
+				scalar.append(self.B_lines[i,k])
+		vertices = np.array(vertices)
+		scalar = plt.valuesToScalar(np.array(scalar))
+		points = plt.vertexToPoints(vertices)
+		# Add to Render
+		if float(scalar.GetValueRange()[1]) > 0:
+			plt.add3Dpoints(points,scalars=scalar,pointsize=pointsize)
+			# Colorbar
+			plt.colorbar()
+		else:
+			plt.add3Dpoints(points,pointsize=pointsize,color=color)
+		# In case it isn't set by user.
+		plt.setBGcolor()
+		# Render if requested
+		if lplotnow: plt.render()
+
+	def plot_poincare3D(self,k=0,pointsize=0.01,color='red',skip=1,plot3D=None):
 		"""Plots the FIELDILNES Poincare cross section in 3D
 
 		This routine makes a 3D Poincare plot.
@@ -235,6 +298,8 @@ class FIELDLINES():
 			Size of points (default: 0.01)
 		color : str (optional)
 			Color to plot points (default: red)
+		skip : int (optional)
+			Number of fieldlines to skip in plot (default: 1)
 		plot3D : plot3D object (optional)
 			Plotting object to render to.
 		"""
@@ -250,11 +315,15 @@ class FIELDLINES():
 			plt = PLOT3D()
 		vertices = []
 		scalar   = []
+		# Adjust phi
 		P = np.mod(self.PHI_lines,self.phiaxis[-1])
+		N = np.floor(self.PHI_lines[0,k]/self.phiaxis[-1])
+		P = P + N*self.phiaxis[-1]
+		# Create the X/Y arrays
 		X = self.R_lines * np.cos(P)
 		Y = self.R_lines * np.sin(P)
 		for i in range(k,self.nsteps,self.npoinc):
-			for j in range(self.nlines):
+			for j in range(0,self.nlines,int(skip)):
 				if (self.R_lines[j,i] > 0):
 					vertices.append([X[j,i],Y[j,i],self.Z_lines[j,i]])
 		vertices = np.array(vertices)
@@ -265,6 +334,110 @@ class FIELDLINES():
 		plt.setBGcolor()
 		# Render if requested
 		if lplotnow: plt.render()
+		
+	def plot_orbit(self,markers=None,plot3D=None,color='red'):
+		"""Plots 3D trace of fieldlines
+
+		This routine plots traces of the fieldline orbits in 3D.
+
+		Parameters
+		----------
+		markers : list (optional)
+			List of marker indices to plot (default: all)
+		plot3D : plot3D object (optional)
+			Plotting object to render to.
+		"""
+		import numpy as np
+		import vtk
+		from libstell.plot3D import PLOT3D
+		# Handle optionals
+		if plot3D: 
+			lplotnow=False
+			plt = plot3D
+		else:
+			lplotnow = True
+			plt = PLOT3D()
+		# Handle markers
+		if type(markers) == type(None):
+			markers_in = np.linspace(0,self.nparticles-1,dtype=int)
+		else:
+			markers_in = markers
+		# Plot markers
+		for i in markers_in:
+			j = np.argwhere(np.squeeze(self.R_lines[i,:])>0)
+			k = j[-1][0]
+			points_array = np.zeros((k,3))
+			points_array[:,0] = self.X_lines[i,0:k]
+			points_array[:,1] = self.Y_lines[i,0:k]
+			points_array[:,2] = self.Z_lines[i,0:k]
+			# Convert numpy array to VTK points
+			points = vtk.vtkPoints()
+			for point in points_array:
+				points.InsertNextPoint(point)
+			plt.add3Dline(points,linewidth=2,color=color)
+		# In case it isn't set by user.
+		plt.setBGcolor()
+		# Render if requested
+		if lplotnow: plt.render()
+
+	def write_asc(self,phi,nskip=1,filename='fieldlines_poincare.asc'):
+		"""Writes Poincare points to an ASC file
+
+		This routine writes the Poincare data into an ASC file for
+		reading into CAD software (FreeCAD). ASC files are just
+		ASCII files with the points written in x,y,z format. Output is
+		in mm.
+
+		Parameters
+		----------
+		phi : list
+			Toroidal index to output. [radians]
+		nskip : int (optional)
+			Number of fieldlines to skip.
+		filename: str
+			Filename to output to (default: fieldlines_poincare.asc)
+		"""
+		import numpy as np
+		f = open(filename,'w')
+		phi_arr = np.linspace(0,np.pi*2,self.npoinc*self.nfp+1)
+		for phival in phi:
+			k = (np.abs(phi_arr - phival)).argmin() # Find nearest value
+			r = 1000.*self.R_lines[0:self.nlines:nskip,k:self.nsteps-2:self.npoinc].flatten()
+			z = 1000.*self.Z_lines[0:self.nlines:nskip,k:self.nsteps-2:self.npoinc].flatten()
+			p = np.mod(self.PHI_lines[0:self.nlines:nskip,k:self.nsteps-2:self.npoinc].flatten(),self.phiaxis[-1])
+			x = r*np.cos(p)
+			y = r*np.sin(p)
+			for i,x0 in enumerate(x):
+				f.write(f"{x0:10.3f} {y[i]:10.3f} {z[i]:10.3f}\n")
+		f.close()
+
+	def write_orbit_asc(self,k,filename='fieldlines_orbit.asc'):
+		"""Writes field line orbit to an ASC file
+
+		This routine writes the Poincare data into an ASC file for
+		reading into CAD software (FreeCAD). ASC files are just
+		ASCII files with the points written in x,y,z format. Output is
+		in mm.
+
+		Parameters
+		----------
+		k : int
+			Field line to output
+		nskip : int (optional)
+			Number of fieldlines to skip.
+		filename: str
+			Filename to output to (default: fieldlines_poincare.asc)
+		"""
+		import numpy as np
+		f = open(filename,'w')
+		r = 1000.*self.R_lines[k,:].flatten()
+		z = 1000.*self.Z_lines[k,:].flatten()
+		p = self.PHI_lines[k,:].flatten()
+		x = r*np.cos(p)
+		y = r*np.sin(p)
+		for i,x0 in enumerate(x):
+			f.write(f"{x0:10.3f} {y[i]:10.3f} {z[i]:10.3f}\n")
+		f.close()
 
 	def plot_heatflux(self,factor=1.0,colormap='hot',plot3D=None):
 		"""Plots the BEAMS3D wall heat flux

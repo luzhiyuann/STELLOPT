@@ -6,6 +6,7 @@ matplotlib.use("Qt5Agg")
 import matplotlib.pyplot as _plt
 import numpy as np                    #For Arrays
 from math import pi
+import glob
 #QT5
 from PyQt5 import uic, QtGui, QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QSizePolicy, QWidget, QFileDialog, QTableWidgetItem
@@ -19,8 +20,14 @@ from mpl_toolkits import mplot3d
 from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 #
 from libstell import vmec
+from libstell import boozer
+from libstell import gist
 from libstell import stellopt
 from libstell import plot3D
+from libstell import bootsj
+from libstell import bnorm
+from libstell import coils
+from libstell import fieldlines
 
 try:
 	qtCreatorPath=os.environ["STELLOPT_PATH"]
@@ -88,6 +95,16 @@ class MyApp(QMainWindow):
 		self.ui.OPTplot_box.addWidget(self.canvas2)
 		self.toolbar = NavigationToolbar(self.canvas2, self)
 		self.ui.OPTplot_box.addWidget(self.toolbar)
+		# VTK stuff STELLOPT
+		self.frame_vtk_sopt = QWidget()
+		self.vtkWidget_sopt = QVTKRenderWindowInteractor(self.frame_vtk_sopt)
+		self.ui.OPTplot_box.addWidget(self.vtkWidget_sopt)
+		self.vtkWidget_sopt.Initialize()
+		self.vtkWidget_sopt.Start()
+		# Create a VTK STELLOPT renderer and add it to the render window
+		self.plt_sopt = plot3D.PLOT3D(lwindow=False)
+		self.vtkWidget_sopt.GetRenderWindow().AddRenderer(self.plt_sopt.renderer)
+		self.vtkWidget_sopt.hide()
 		# Setup STELLOPT Pannels
 		#self.UpdateOPTtype()
 		#self.UpdateOPTVarsScalar()
@@ -117,7 +134,11 @@ class MyApp(QMainWindow):
 		# Callbacks (OPT_plot Tab)
 		self.ui.ButtonLoadSTELLOPT.clicked.connect(self.LoadSTELLOPT)
 		self.ui.ComboBoxOPTplot_type.currentIndexChanged.connect(self.UpdateOptplot)
+		self.ui.ComboBoxOPTplot_iter.activated.connect(self.UpdateIterFile)
+		self.ui.ComboBoxOPTplot_surf.activated.connect(self.UpdateBoozerSpec)
 		self.ui.ButtonPlotSTELLOPT.clicked.connect(self.PlotSTELLOPT)
+		# For plots
+		self.gist_plots = ['g11','g12','g22','|Jac|','Bhat','L1','L2','dBdt','Local Shear']
 
 	def UpdateMpol(self):
 		strtmp = self.ui.TextMpol.text()
@@ -866,6 +887,8 @@ class MyApp(QMainWindow):
 		w.setWindowTitle("Load STELLOPT Output")
 		filename = QFileDialog.getOpenFileName(w, 'Open File', '.','STELLOPT (stellopt.*)')
 		w.destroy
+		# Helper for other files:
+		self.workdir,ext = filename[0].split('stellopt.',1)
 		# Read the file
 		self.stel_data.read_stellopt_output(filename[0])
 		self.optplot_list = ['ASPECT','BETA','CURTOR','EXTCUR','SEPARATRIX',\
@@ -873,11 +896,14 @@ class MyApp(QMainWindow):
 					'B_PROBES','FARADAY','FLUXLOOPS','SEGROG','MSE',\
 					'NE','NELINE','TE','TELINE','TI','TILINE','ZEFFLINE',\
 					'XICS','XICS_BRIGHT','XICS_W3','XICS_V','SXR','VPHI','VACIOTA',\
-					'IOTA','BALLOON','BOOTSTRAP','DKES','DKES_ERDIFF','DKES_ALPHA',\
-					'HELICITY','HELICITY_FULL',\
+					'IOTA','BALLOON','BOOTSTRAP',\
+					'DKES_11','DKES_31','DKES_33','DKES_ERDIFF','DKES_ALPHA',\
+					'B10B11','HELICITY','HELICITY_FULL','QUASIISO','GAMMA_C', \
 					'KINK','ORBIT','JDOTB','J_STAR','NEO','TXPORT','ECEREFLECT',\
 					'S11','S12','S21','S22','MAGWELL',\
-					'CURVATURE_KERT','CURVATURE_P2','QUASIISO']
+					'CURVATURE_KERT','CURVATURE_P2','TOTALBOOTSTRAP',\
+					'BNORMAL', 'BNMNS', 'BNMNC', 'COIL_CURVATURE', 'COIL_TORSION', \
+					'COIL_LENGTH','COILCOIL_DISTANCE','BAXIS','LGRADB']
 		self.ui.ComboBoxOPTplot_type.clear()
 		self.ui.ComboBoxOPTplot_type.addItem('Chi-Squared')
 		# Handle Chisquared plots
@@ -885,16 +911,20 @@ class MyApp(QMainWindow):
 			for item in vars(self.stel_data).keys():
 				if (name+'_TARGET' == item):
 					self.ui.ComboBoxOPTplot_type.addItem(name)
+		# Jacobian
+		files = os.listdir(self.workdir)
+		if any('jacobian.' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('Jacobian')
 		# Handle Special Plots
 		self.ui.ComboBoxOPTplot_type.addItem('-----SPECIAL-----')
 		for name in ['BALLOON','KINK','ORBIT','NEO','HELICITY','HELICITY_FULL',\
-					'TXPORT','B_PROBES','FLUXLOOPS','SEGROG',\
+					'B10B11','BOOTSTRAP','TXPORT','B_PROBES','FLUXLOOPS','SEGROG',\
 					'NELINE','TELINE','TILINE','ZEFFLINE',\
 					'XICS','XICS_BRIGHT','XICS_W3','XICS_V',\
 					'S11','S12','S21','S22','MAGWELL','VACIOTA',\
 					'CURVATURE_KERT','CURVATURE_P2',\
 					'ECEREFLECT','SXR','IOTA','PRESS','PRESSPRIME'\
-					'VISBREMLINE','QUASIISO']:
+					'VISBREMLINE','QUASIISO','GAMMA_C']:
 			for item in vars(self.stel_data).keys():
 				if (name+'_TARGET' == item):
 					self.ui.ComboBoxOPTplot_type.addItem(name+'_evolution')
@@ -904,12 +934,15 @@ class MyApp(QMainWindow):
 					self.ui.ComboBoxOPTplot_type.addItem(name+'_evolution')
 					self.ui.ComboBoxOPTplot_type.addItem(name+'_evolution_R')
 					self.ui.ComboBoxOPTplot_type.addItem(name+'_evolution_Z')
-		if 'DKES_TARGET' in vars(self.stel_data).keys():
+		if 'DKES_11_TARGET' in vars(self.stel_data).keys():
 			self.ui.ComboBoxOPTplot_type.addItem('DKES_L11')
+		if 'DKES_31_TARGET' in vars(self.stel_data).keys():
 			self.ui.ComboBoxOPTplot_type.addItem('DKES_L31')
+		if 'DKES_33_TARGET' in vars(self.stel_data).keys():
 			self.ui.ComboBoxOPTplot_type.addItem('DKES_L33')
+		if 'LGRADB_TARGET' in vars(self.stel_data).keys():
+			self.ui.ComboBoxOPTplot_type.addItem('LGRADB_surf')
 		# Handle Wout Comparrison Plots
-		self.workdir,ext = filename[0].split('stellopt.',1)
 		files = os.listdir(self.workdir)
 		if any('wout' in mystring for mystring in files):
 			self.ui.ComboBoxOPTplot_type.addItem('----- VMEC -----')
@@ -922,8 +955,77 @@ class MyApp(QMainWindow):
 			self.ui.ComboBoxOPTplot_type.addItem('q-prof')
 			self.ui.ComboBoxOPTplot_type.addItem('<j*B>')
 			self.ui.ComboBoxOPTplot_type.addItem('Mercier')
+			self.ui.ComboBoxOPTplot_type.addItem('Magwell')
 			wout_files = sorted([k for k in files if 'wout' in k])
 			self.wout_files = sorted([k for k in wout_files if '_opt' not in k])
+		# Handle Bnorm
+		if any('bnorm' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- B-Normal -----')
+			self.ui.ComboBoxOPTplot_type.addItem('B-Normal (Plasma)')
+			self.ui.ComboBoxOPTplot_type.addItem('B-Normal (Coil)')
+			self.ui.ComboBoxOPTplot_type.addItem('B-Normal (Total)')
+			bnormal_file = sorted([k for k in files if 'bnorm_real.' in k])
+			self.bnormal_file = sorted([k for k in bnormal_file if '_opt' not in k])
+		# Handle Baxis
+		if any('baxis_' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- B-AXIS -----')
+			self.ui.ComboBoxOPTplot_type.addItem('B-Axis')
+			baxis_file = sorted([k for k in files if 'baxis_real.' in k])
+			self.baxis_file = sorted([k for k in baxis_file if '_opt' not in k])
+		# Handle Boozer Transformation
+		if any('boozmn' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- Boozer Coordinates -----')
+			self.ui.ComboBoxOPTplot_type.addItem('Boozer Spectrum')
+			self.ui.ComboBoxOPTplot_type.addItem('Boozer |B|')
+			self.ui.ComboBoxOPTplot_type.addItem('B10/B11')
+			self.ui.ComboBoxOPTplot_type.addItem('QAS_ERROR')
+			self.ui.ComboBoxOPTplot_type.addItem('QPS_ERROR')
+			self.ui.ComboBoxOPTplot_type.addItem('QHS_ERROR')
+			booz_files = sorted([k for k in files if 'boozmn' in k])
+			self.booz_files = sorted([k for k in booz_files if '_opt' not in k])
+		# Handle Current Density Profiles
+		if any('answers_plot.' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- Bootstrap Current -----')
+			self.ui.ComboBoxOPTplot_type.addItem('Bootstrap Current Density')
+			self.ui.ComboBoxOPTplot_type.addItem('Bootstrap Current Total')
+			bootsj_files = sorted([k for k in files if 'answers_plot.' in k])
+			self.bootsj_files = sorted([k for k in bootsj_files if '_opt' not in k])
+		# Handle Coil
+		if any('coils' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- Coils -----')
+			self.ui.ComboBoxOPTplot_type.addItem('Coil Length')
+			self.ui.ComboBoxOPTplot_type.addItem('Coil Curvature')
+			self.ui.ComboBoxOPTplot_type.addItem('Coil Torsion')
+			self.ui.ComboBoxOPTplot_type.addItem('Coil Shape')
+			coils_files = sorted([k for k in files if 'coils.' in k])
+			self.coils_files = sorted([k for k in coils_files if '_opt' not in k])
+		# Handle Current Density Profiles
+		if any('jprof.' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- Current Density -----')
+			self.ui.ComboBoxOPTplot_type.addItem('Bootstrap Profile')
+			self.ui.ComboBoxOPTplot_type.addItem('Beam Profile')
+			self.ui.ComboBoxOPTplot_type.addItem('Total Current Profile')
+			jprof_files = sorted([k for k in files if 'jprof.' in k])
+			self.jprof_files = sorted([k for k in jprof_files if '_opt' not in k])
+		# Handle Diagnostic Profiles
+		if any('dprof.' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- Diagnostic -----')
+			self.ui.ComboBoxOPTplot_type.addItem('XICS Emissivity')
+			self.ui.ComboBoxOPTplot_type.addItem('E-Static Potential')
+			self.dprof_files = sorted([k for k in files if 'dprof.' in k])
+		# Handle Poincare Data
+		if any('fieldlines' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- Poincaré -----')
+			self.ui.ComboBoxOPTplot_type.addItem('Vacuum (phi=0)')
+			fieldlines_files = sorted([k for k in files if 'fieldlines_' in k])
+			self.fieldlines_files = sorted([k for k in fieldlines_files if '_opt' not in k])
+		# Handle GIST gyrokinetic input files
+		if any('gist_' in mystring for mystring in files):
+			self.ui.ComboBoxOPTplot_type.addItem('----- GIST Inputs -----')
+			for name in self.gist_plots:
+				self.ui.ComboBoxOPTplot_type.addItem(name)
+			gist_files = sorted([k for k in files if 'gist_' in k])
+			self.gist_files = sorted([k for k in gist_files if '_opt' not in k])
 		# Handle Kinetic Profiles
 		if any('tprof.' in mystring for mystring in files):
 			self.ui.ComboBoxOPTplot_type.addItem('----- Kinetics -----')
@@ -933,41 +1035,153 @@ class MyApp(QMainWindow):
 			self.ui.ComboBoxOPTplot_type.addItem('Z Effective')
 			tprof_files = sorted([k for k in files if 'tprof.' in k])
 			self.tprof_files = sorted([k for k in tprof_files if '_opt' not in k])
-		# Handle Diagnostic Profiles
-		if any('dprof.' in mystring for mystring in files):
-			self.ui.ComboBoxOPTplot_type.addItem('----- Diagnostic -----')
-			self.ui.ComboBoxOPTplot_type.addItem('XICS Emissivity')
-			self.ui.ComboBoxOPTplot_type.addItem('E-Static Potential')
-			self.dprof_files = sorted([k for k in files if 'dprof.' in k])
-		# Handle Current Density Profiles
-		if any('jprof.' in mystring for mystring in files):
-			self.ui.ComboBoxOPTplot_type.addItem('----- Current Density -----')
-			self.ui.ComboBoxOPTplot_type.addItem('Bootstrap Profile')
-			self.ui.ComboBoxOPTplot_type.addItem('Beam Profile')
-			self.ui.ComboBoxOPTplot_type.addItem('Total Current Profile')
-			jprof_files = sorted([k for k in files if 'tprof.' in k])
-			self.jprof_files = sorted([k for k in jprof_files if '_opt' not in k])
 		
+	def UpdateIterFile(self):
+		plot_name = self.ui.ComboBoxOPTplot_type.currentText()
+		test_file = self.ui.ComboBoxOPTplot_iter.currentText()
+		if test_file:
+			print(rf'iter file: {test_file}')
+			if plot_name == 'Jacobian':
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				self.stel_data.read_stellopt_jacobian(test_file)
+				self.stel_data.read_stellopt_varlabels()
+				self.stel_data.plot_stellopt_jacobian(target='all',ax=self.ax2)
+				self.canvas2.draw()
+			elif plot_name in ['Boozer Spectrum','Boozer |B|']:
+				self.ui.ComboBoxOPTplot_surf.clear()
+				self.booz_data = boozer.BOOZER()
+				self.booz_data.read_boozer(test_file)
+				idx = np.flatnonzero(self.booz_data.idx_b)
+				for k in idx:
+					self.ui.ComboBoxOPTplot_surf.addItem(str(k+1))
+				self.UpdateBoozerSpec()
+			elif plot_name in ['B-Normal (Plasma)']:
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				self.stel_data.read_stellopt_bnorm_real(test_file)
+				umax = int(self.stel_data.bnorm_real[1,:].max())
+				vmax = int(self.stel_data.bnorm_real[2,:].max())
+				u = self.stel_data.bnorm_real[3,:].reshape((vmax,umax))
+				v = self.stel_data.bnorm_real[4,:].reshape((vmax,umax))
+				b = self.stel_data.bnorm_real[11,:].reshape((vmax,umax))
+				hmesh=self.ax2.pcolormesh(v,u,b,cmap='jet')
+				self.ax2.set_ylabel(r'$\theta$ [rad]')
+				self.ax2.set_xlabel(r'$\zeta$ [rad]')
+				self.ax2.set_title('B-Normal (Plasma)')
+				_plt.colorbar(hmesh,label=r'$B_{normal}$ [T]',ax=self.ax2)
+				self.canvas2.draw()
+			elif plot_name in ['B-Normal (Coil)']:
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				self.stel_data.read_stellopt_bnorm_real(test_file)
+				umax = int(self.stel_data.bnorm_real[1,:].max())
+				vmax = int(self.stel_data.bnorm_real[2,:].max())
+				u = self.stel_data.bnorm_real[3,:].reshape((vmax,umax))
+				v = self.stel_data.bnorm_real[4,:].reshape((vmax,umax))
+				b = self.stel_data.bnorm_real[12,:].reshape((vmax,umax))
+				hmesh=self.ax2.pcolormesh(v,u,b,cmap='jet')
+				self.ax2.set_ylabel(r'$\theta$ [rad]')
+				self.ax2.set_xlabel(r'$\zeta$ [rad]')
+				self.ax2.set_title('B-Normal (Coil)')
+				_plt.colorbar(hmesh,label=r'$B_{normal}$ [T]',ax=self.ax2)
+				self.canvas2.draw()
+			elif plot_name in ['B-Normal (Total)']:
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				self.stel_data.read_stellopt_bnorm_real(test_file)
+				umax = int(self.stel_data.bnorm_real[1,:].max())
+				vmax = int(self.stel_data.bnorm_real[2,:].max())
+				u = self.stel_data.bnorm_real[3,:].reshape((vmax,umax))
+				v = self.stel_data.bnorm_real[4,:].reshape((vmax,umax))
+				b = self.stel_data.bnorm_real[13,:].reshape((vmax,umax))
+				hmesh=self.ax2.pcolormesh(v,u,b,cmap='jet')
+				self.ax2.set_ylabel(r'$\theta$ [rad]')
+				self.ax2.set_xlabel(r'$\zeta$ [rad]')
+				self.ax2.set_title('B-Normal (Total)')
+				_plt.colorbar(hmesh,label=r'$B_{normal}$ [T]',ax=self.ax2)
+				self.canvas2.draw()
+			elif plot_name in ['B-Axis']:
+				self.stel_data.read_stellopt_baxis(test_file)
+				self.plt_sopt.clear_scene()
+				self.stel_data.plot_stellopt_baxis(plot3D=self.plt_sopt)
+			elif plot_name in ['Coil Curvature']:
+				self.stel_data.read_stellopt_coil_curvature(test_file)
+				self.plt_sopt.clear_scene()
+				self.stel_data.plot_stellopt_coil_curvature(plot3D=self.plt_sopt)
+			elif plot_name in ['Coil Torsion']:
+				self.stel_data.read_stellopt_coil_curvature(test_file)
+				self.plt_sopt.clear_scene()
+				self.stel_data.plot_stellopt_coil_torsion(plot3D=self.plt_sopt)
+			elif plot_name in ['Vacuum (phi=0)']:
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				fieldlines_data=fieldlines.FIELDLINES()
+				fieldlines_data.read_fieldlines(test_file)
+				fieldlines_data.plot_poincare(0.0,nskip=1,ax=self.ax2)
+			elif plot_name in self.gist_files:
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				self.ui.ComboBoxOPTplot_surf.clear()
+				self.gist_data = gist.GIST()
+				self.gist_data.read_gist(test_file)
+			elif plot_name in ['LGRADB_surf']:
+				self.fig2.clf()
+				self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+				self.ui.ComboBoxOPTplot_surf.clear()
+				iter_val = int(test_file)
+				print(iter_val)
+				iter_dex=np.flatnonzero(self.stel_data.ITER == iter_val)[0]
+				print(iter_dex)
+				theta = np.unique(self.stel_data.LGRADB_THETA[iter_dex,:])
+				phi = np.unique(self.stel_data.LGRADB_PHI[iter_dex,:])
+				ntheta = len(theta)
+				nphi   = len(phi)
+				lgradb = np.reshape(self.stel_data.LGRADB_LGRADB[iter_dex,:],(ntheta,nphi))
+				hmesh=self.ax2.pcolormesh(phi,theta,lgradb,cmap='jet')
+				self.ax2.set_xlabel('Toroidal Angle [rad]')
+				self.ax2.set_ylabel('Poloidal Angle [rad]')
+				_plt.colorbar(hmesh,label=r'$L_{\nabla B}$',ax=self.ax2)
+			elif hasattr(self,'gist_files'):
+				if plot_name in self.gist_files:
+					self.fig2.clf()
+					self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+					self.ui.ComboBoxOPTplot_surf.clear()
+					self.gist_data = gist.GIST()
+					self.gist_data.read_gist(test_file)
+
+
+	def UpdateBoozerSpec(self):
+		plot_name = self.ui.ComboBoxOPTplot_type.currentText()
+		plot_k = int(self.ui.ComboBoxOPTplot_surf.currentText())
+		self.fig2.clf()
+		self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+		print(rf'plot_k = {plot_k}')
+		if plot_name == 'Boozer Spectrum':
+			self.booz_data.plotBmnSpectrum(plot_k-1,ax=self.ax2)
+		elif plot_name == 'Boozer |B|':
+			self.booz_data.plotBsurf(plot_k-1,ax=self.ax2)
+		self.canvas2.draw()
 
 	def UpdateOptplot(self):
 		# Handle plotting of 
 		plot_name = self.ui.ComboBoxOPTplot_type.currentText()
+		self.ui.ComboBoxOPTplot_iter.clear()
+		self.ui.ComboBoxOPTplot_surf.clear()
 		self.fig2.clf()
-		niter = len(self.stel_data.ITER)
-		#self.fig.delaxes(self.ax)
-		#self.ax2 = self.fig2.add_subplot(111)
 		self.ax2 = self.fig2.add_axes([0.2,0.2,0.7,0.7])
+		self.canvas2.show()
+		self.vtkWidget_sopt.hide()
+		niter = len(self.stel_data.ITER)
 		if (plot_name == 'Chi-Squared'):
 			chisq = ((self.stel_data.TARGETS - self.stel_data.VALS)/self.stel_data.SIGMAS)**2
 			self.ax2.semilogy(self.stel_data.ITER,np.sum(chisq,axis=1),'ok',label='Chisq Total')
 			self.ax2.set_xlabel('Iteration')
 			self.ax2.set_ylabel('Chi-Squared')
 			self.ax2.set_title('Chi-Sqaured')
-			#self.ax2.set_yscale('log')
 			for name in self.optplot_list:
 				if name+'_CHISQ' in vars(self.stel_data).keys():
 					chisq_temp = getattr(self.stel_data,name+'_CHISQ')
-					#chisq_temp = self.stel_data[name+'_chisq']
 					n = chisq_temp.shape;
 					if (len(chisq_temp.shape) == 1):
 						if n[0] > len(self.stel_data.ITER):
@@ -1027,6 +1241,7 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel('Proxy Function')
 			self.ax2.set_title('Turbulent Transport Proxy')
 			self.ax2.set_xlim((0,1))
+			self.ax2.legend()
 		elif (plot_name == 'ORBIT_evolution'):
 			x = self.stel_data.ORBIT_S
 			y = self.stel_data.ORBIT_EQUIL
@@ -1041,6 +1256,7 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel('Orbit Losses')
 			self.ax2.set_title('Gyro Particle Losses')
 			self.ax2.set_xlim((0,1))
+			self.ax2.legend()
 		elif (plot_name == 'NEO_evolution'):
 			x = self.stel_data.NEO_K
 			y = self.stel_data.NEO_EPS_EFF32
@@ -1054,24 +1270,59 @@ class MyApp(QMainWindow):
 			self.ax2.set_xlabel('Radial Grid')
 			self.ax2.set_ylabel('Epsilon Effective')
 			self.ax2.set_title('Neoclassical Helical Ripple (NEO)')
+			self.ax2.legend()
+		elif (plot_name == 'B10B11_evolution'):
+			x = self.stel_data.B10B11_K
+			y = self.stel_data.B10B11_VAL
+			t = self.stel_data.B10B11_TARGET
+			d = self.stel_data.B10B11_SIGMA
+			self.ax2.errorbar(x[0,:],t[0,:],yerr=d[0,:],fmt='ok',fillstyle='none',label='Target')
+			self.ax2.plot(x[0,:],y[0,:],'o',fillstyle='none',label='Initial',color='red')
+			for i in range(1,niter-1,1):
+				self.ax2.plot(x[i,:],y[i,:],'.k',fillstyle='none')
+			self.ax2.plot(x[niter-1,:],y[niter-1,:],'o',fillstyle='none',label='Final',color='green')
+			self.ax2.set_xlabel('Radial Grid')
+			self.ax2.set_ylabel(r'$B_{01}/B_{11}$')
+			self.ax2.set_title('Boozer Harmonic Ratios')
+			self.ax2.legend()
+		elif (plot_name == 'BOOTSTRAP_evolution'):
+			x = self.stel_data.BOOTSTRAP_RHO # actually flux
+			y = self.stel_data.BOOTSTRAP_VAL #
+			t = self.stel_data.BOOTSTRAP_TARGET
+			d = self.stel_data.BOOTSTRAP_SIGMA
+			self.ax2.errorbar(x[0,:],t[0,:],yerr=d[0,:],fmt='ok',fillstyle='none',label='Target')
+			self.ax2.plot(x[0,:],y[0,:],'o',fillstyle='none',label='Initial',color='red')
+			for i in range(1,niter-1,1):
+				self.ax2.plot(x[i,:],y[i,:],'.k',fillstyle='none')
+			self.ax2.plot(x[niter-1,:],y[niter-1,:],'o',fillstyle='none',label='Final',color='green')
+			self.ax2.set_xlabel('Radial Grid')
+			self.ax2.set_ylabel('Bootstrap Current')
+			self.ax2.set_title('Bootstrap Current (BOOTSJ)')
+			self.ax2.legend()
 		elif ('DKES_L' in plot_name):
 			# Get L type
 			if plot_name == 'DKES_L11':
-				Lm = self.stel_data.DKES_L11m
-				Lp = self.stel_data.DKES_L11p
+				Lm = self.stel_data.DKES_11_L11m
+				Lp = self.stel_data.DKES_11_L11p
+				s  = self.stel_data.DKES_11_S
+				er = self.stel_data.DKES_11_ER
+				nu = self.stel_data.DKES_11_NU
 				txt_type = 'L11'
 			elif plot_name == 'DKES_L31':
-				Lm = self.stel_data.DKES_L31m
-				Lp = self.stel_data.DKES_L31p
+				Lm = self.stel_data.DKES_31_L31m
+				Lp = self.stel_data.DKES_31_L31p
+				s  = self.stel_data.DKES_31_S
+				er = self.stel_data.DKES_31_ER
+				nu = self.stel_data.DKES_31_NU
 				txt_type = 'L31'
 			elif plot_name == 'DKES_L33':
-				Lm = self.stel_data.DKES_L33m
-				Lp = self.stel_data.DKES_L33p
+				Lm = self.stel_data.DKES_33_L33m
+				Lp = self.stel_data.DKES_33_L33p
+				s  = self.stel_data.DKES_33_S
+				er = self.stel_data.DKES_33_ER
+				nu = self.stel_data.DKES_33_NU
 				txt_type = 'L33'
 			# We need to sort stuff out
-			s  = self.stel_data.DKES_S
-			er = self.stel_data.DKES_ER
-			nu = self.stel_data.DKES_NU
 			s_list  = np.unique(s)
 			er_list = np.unique(er)
 			nu_list = np.unique(nu)
@@ -1105,6 +1356,7 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel(txt_type)
 			self.ax2.set_title("DKES Coefficient "+txt_type)
 			self.ax2.set_yscale('log')
+			self.ax2.set_xscale('log')
 		elif (plot_name == 'HELICITY_FULL_evolution'):
 			x = self.stel_data.HELICITY_FULL_K
 			y = self.stel_data.HELICITY_FULL_VAL
@@ -1117,6 +1369,7 @@ class MyApp(QMainWindow):
 			self.ax2.plot(x[niter-1,:],y[niter-1,:],'o',fillstyle='none',label='Final',color='green')
 			self.ax2.set_ylabel('Helicity')
 			self.ax2.set_title('Boozer Spectrum Helicity')
+			self.ax2.legend()
 		elif (plot_name == 'MAGWELL_evolution'):
 			x = self.stel_data.MAGWELL_k
 			y = self.stel_data.MAGWELL_MAGWELL
@@ -1130,6 +1383,21 @@ class MyApp(QMainWindow):
 			self.ax2.set_xlabel('Radial Grid')
 			self.ax2.set_ylabel('Magnetic Well')
 			self.ax2.set_title('Magnetic Well Evolution  (>0 Well)')
+			self.ax2.legend()
+		elif (plot_name == 'GAMMA_C_evolution'):
+			x = self.stel_data.GAMMA_C_K
+			y = self.stel_data.GAMMA_C_VAL
+			t = self.stel_data.GAMMA_C_TARGET
+			d = self.stel_data.GAMMA_C_SIGMA
+			self.ax2.errorbar(x[0,:],t[0,:],yerr=d[0,:],fmt='ok',fillstyle='none',label='Target')
+			self.ax2.plot(x[0,:],y[0,:],'o',fillstyle='none',label='Initial',color='red')
+			for i in range(1,niter-1,1):
+				self.ax2.plot(x[i,:],y[i,:],'.k',fillstyle='none')
+			self.ax2.plot(x[niter-1,:],y[niter-1,:],'o',fillstyle='none',label='Final',color='green')
+			self.ax2.set_xlabel('Radial Grid')
+			self.ax2.set_ylabel(rf'$\Gamma_C$ Metric')
+			self.ax2.set_title(rf'Fast Ion Confinement Metric ($\Gamma_C$)')
+			self.ax2.legend()
 		elif (plot_name == 'QUASIISO_evolution'):
 			x = self.stel_data.QUASIISO_K
 			y = self.stel_data.QUASIISO_VAL
@@ -1143,6 +1411,7 @@ class MyApp(QMainWindow):
 			self.ax2.set_xlabel('Radial Grid')
 			self.ax2.set_ylabel('QI Metric')
 			self.ax2.set_title('Quasi-isodynamic Metric')
+			self.ax2.legend()
 		elif (plot_name == 'CURVATURE_P2'):
 			#x = self.stel_data.TXPORT_S
 			#y = self.stel_data.CURVATURE_P2_P2
@@ -1168,6 +1437,7 @@ class MyApp(QMainWindow):
 			self.ax2.set_xlabel('B-Probe')
 			self.ax2.set_ylabel('Signal')
 			self.ax2.set_title('B-Probe Reconstruction')
+			self.ax2.legend()
 		elif (plot_name == 'FLUXLOOPS_evolution'):
 			n=self.stel_data.FLUXLOOPS_TARGET.shape
 			y = self.stel_data.FLUXLOOPS_TARGET.T
@@ -1190,6 +1460,7 @@ class MyApp(QMainWindow):
 			self.ax2.set_xlabel('Fluxloop')
 			self.ax2.set_ylabel('Signal')
 			self.ax2.set_title('Fluxloop Reconstruction')
+			self.ax2.legend()
 		elif (plot_name == 'SEGROG_evolution'):
 			n=self.stel_data.SEGROG_TARGET.shape
 			y = self.stel_data.SEGROG_TARGET.T
@@ -1216,7 +1487,7 @@ class MyApp(QMainWindow):
 			n=self.stel_data.ECEREFLECT_TARGET.shape
 			y = self.stel_data.ECEREFLECT_TARGET.T
 			s = self.stel_data.ECEREFLECT_SIGMA.T
-			e = self.stel_data.ECEREFLECT_EQUIL.T
+			e = self.stel_data.ECEREFLECT_VAL.T
 			dl = n[0]
 			if (len(n)==0):
 				# Single Time slice Single point
@@ -1759,6 +2030,63 @@ class MyApp(QMainWindow):
 			self.ax2.set_xlabel('Channel')
 			self.ax2.set_ylabel('Signal [Arb.]')
 			self.ax2.set_title('XICS Velocity Reconstruction')
+		elif (plot_name == 'Jacobian'):
+			file_list = sorted(glob.glob("jacobian.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'B-Normal (Plasma)'):
+			file_list = sorted(glob.glob("bnorm_real.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'B-Normal (Coil)'):
+			file_list = sorted(glob.glob("bnorm_real.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'B-Normal (Total)'):
+			file_list = sorted(glob.glob("bnorm_real.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'LGRADB_surf'):
+			iter_list = self.stel_data.ITER
+			for item in iter_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(str(int(item)))
+			self.UpdateIterFile()
+		elif (plot_name == 'B-Normal'):
+			file_list = sorted(glob.glob("bnorm_real.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'Boozer Spectrum'):
+			file_list = sorted(glob.glob("boozmn*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'Boozer |B|'):
+			file_list = sorted(glob.glob("boozmn*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
+		elif (plot_name == 'B10/B11'):
+			booz_data = boozer.BOOZER()
+			l=0
+			dl = len(self.booz_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.booz_files:
+				if 'boozmn' in string:
+					booz_data.read_boozer(self.workdir+string)
+					b10b11 = booz_data.calcB10B11()
+					s = np.squeeze(booz_data.phi_b)
+					s = s/s[-1]
+					self.ax2.plot(s,b10b11,'o',color=_plt.cm.brg(l/dl))
+					l = l + 1
+			self.ax2.set_xlabel('Norm Tor. Flux (s)')
+			self.ax2.set_ylabel(r'$B_{10}/B_{11}$')
+			self.ax2.set_title('Boozer Spectrum Ratio')
+			self.ax2.set_xlim((0,1))
 		elif (plot_name == 'Pressure'):
 			vmec_data = vmec.VMEC()
 			l=0
@@ -1776,6 +2104,63 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel('Pressure [kPa]')
 			self.ax2.set_title('VMEC Pressure Evolution')
 			self.ax2.set_xlim((0,1))
+		elif (plot_name == 'Coil Length'):
+			niter = self.stel_data.COIL_LENGTH_LENGTH.shape[0]
+			ncoils = self.stel_data.COIL_LENGTH_LENGTH.shape[1]
+			y = self.stel_data.COIL_LENGTH_LENGTH
+			self.ax2.plot(y)
+			self.ax2.set_xlabel('Iterations')
+			self.ax2.set_ylabel('Length [m]')
+			self.ax2.set_title('Coil Length')
+
+		elif (plot_name == 'Coil Curvature'):
+			file_list = sorted(glob.glob("coil_curvature.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.canvas2.hide()
+			self.vtkWidget_sopt.show()
+			self.plt_sopt.renderer.RemoveAllViewProps()
+			self.UpdateIterFile()
+		elif (plot_name == 'Coil Torsion'):
+			file_list = sorted(glob.glob("coil_curvature.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.canvas2.hide()
+			self.vtkWidget_sopt.show()
+			self.plt_sopt.renderer.RemoveAllViewProps()
+			self.UpdateIterFile()
+		elif (plot_name == 'Coil Shape'):
+			self.canvas2.hide()
+			self.vtkWidget_sopt.show()
+			self.plt_sopt.renderer.RemoveAllViewProps()
+			l=0
+			dl = len(self.coils_files)-1
+			if dl == 0 : dl = 1
+			for string in self.coils_files:
+				if 'coils.' in string:
+					coil_data = coils.COILSET()
+					coil_data.read_coils_file(self.workdir+string)
+					if l == 0:
+						plot_color = 'red'
+					elif l == dl:
+						plot_color = 'green'
+					else:
+						plot_color = 'grey'
+					coil_data.plotcoilsHalfFP(plot3D=self.plt_sopt,color=plot_color)
+					l=l+1
+		elif (plot_name == 'B-Axis'):
+			file_list = sorted(glob.glob("baxis_real.*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.canvas2.hide()
+			self.vtkWidget_sopt.show()
+			self.plt_sopt.renderer.RemoveAllViewProps()
+			self.UpdateIterFile()
+		elif (plot_name == 'Vacuum (phi=0)'):
+			file_list = sorted(glob.glob("fieldlines_*"))
+			for item in file_list:
+				self.ui.ComboBoxOPTplot_iter.addItem(item)
+			self.UpdateIterFile()
 		elif (plot_name == 'I-prime'):
 			vmec_data = vmec.VMEC()
 			l=0
@@ -1873,6 +2258,21 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel('[Arb]')
 			self.ax2.set_title('Mercier Stability (>0 Stable)')
 			self.ax2.set_xlim((0,1))
+		elif (plot_name == 'Magwell'):
+			vmec_data = vmec.VMEC()
+			l=0
+			dl = len(self.wout_files)-1
+			for string in self.wout_files:
+				if 'wout' in string:
+					vmec_data.read_wout(self.workdir+string)
+					magwell = vmec_data.calc_magwell()
+					nflux = np.linspace(0.0,1.0,vmec_data.ns)
+					self.ax2.plot(nflux,magwell,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Norm Tor. Flux (s)')
+			self.ax2.set_ylabel('W')
+			self.ax2.set_title('Magnetic Well/Hill Stability (>0 Well)')
+			self.ax2.set_xlim((0,1))
 		elif (plot_name == 'Flux0'):
 			vmec_data = vmec.VMEC()
 			l=0
@@ -1924,6 +2324,60 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel('Z [m]')
 			self.ax2.set_title('VMEC Flux Surface Evolution (phi=0)')
 			self.ax2.set_aspect('equal')
+		elif (plot_name == 'QAS_ERROR'):
+			booz_data = boozer.BOOZER()
+			l=0
+			dl = len(self.booz_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.booz_files:
+				if 'boozmn' in string:
+					booz_data.read_boozer(self.workdir+string)
+					error = booz_data.calcQuasiError(0,1)
+					s = np.squeeze(booz_data.phi_b)
+					s = s/s[-1]
+					self.ax2.plot(s,error*100.0,'o',color=_plt.cm.brg(l/dl))
+					l = l + 1
+			self.ax2.set_xlabel('Norm Tor. Flux (s)')
+			self.ax2.set_ylabel('Error [%]')
+			self.ax2.set_title('Quasi-Axisymmetry Error')
+			self.ax2.set_ylim((0,100))
+			self.ax2.set_xlim((0,1))
+		elif (plot_name == 'QPS_ERROR'):
+			booz_data = boozer.BOOZER()
+			l=0
+			dl = len(self.booz_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.booz_files:
+				if 'boozmn' in string:
+					booz_data.read_boozer(self.workdir+string)
+					error = booz_data.calcQuasiError(1,0)
+					s = np.squeeze(booz_data.phi_b)
+					s = s/s[-1]
+					self.ax2.plot(s,error*100.0,'o',color=_plt.cm.brg(l/dl))
+					l = l + 1
+			self.ax2.set_xlabel('Norm Tor. Flux (s)')
+			self.ax2.set_ylabel('Error [%]')
+			self.ax2.set_title('Quasi-Poloidal Symmetry Error')
+			self.ax2.set_ylim((0,100))
+			self.ax2.set_xlim((0,1))
+		elif (plot_name == 'QHS_ERROR'):
+			booz_data = boozer.BOOZER()
+			l=0
+			dl = len(self.booz_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.booz_files:
+				if 'boozmn' in string:
+					booz_data.read_boozer(self.workdir+string)
+					error = booz_data.calcQuasiError(1,1)
+					s = np.squeeze(booz_data.phi_b)
+					s = s/s[-1]
+					self.ax2.plot(s,error*100.0,'o',color=_plt.cm.brg(l/dl))
+					l = l + 1
+			self.ax2.set_xlabel('Norm Tor. Flux (s)')
+			self.ax2.set_ylabel('Error [%]')
+			self.ax2.set_title('Quasi-Helical Symmetry Error')
+			self.ax2.set_ylim((0,100))
+			self.ax2.set_xlim((0,1))
 		elif (plot_name == 'Electron Temperature'):
 			l=0
 			dl = len(self.tprof_files)-1
@@ -2043,6 +2497,179 @@ class MyApp(QMainWindow):
 			self.ax2.set_ylabel('Current Density [kA/m^-2]')
 			self.ax2.set_title('Total Current Profile')
 			self.ax2.set_xlim((0,1))
+		elif (plot_name == 'Bootstrap Current Density'):
+			bootsj_data = bootsj.BOOTSJ()
+			l = 0
+			dl = len(self.bootsj_files)-1
+			if dl == 0: dl = 1
+			for string in self.bootsj_files:
+				if 'answers_plot.' in string:
+					bootsj_data.read_answers_plot(self.workdir+string)
+					self.ax2.plot(bootsj_data.rhoar,bootsj_data.dibs,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Norm. Toroidal Flux (s)')
+			self.ax2.set_ylabel('dI/ds [A]')
+			self.ax2.set_title('BOOTSJ Bootstrap Current Density')
+			self.ax2.set_xlim((0.0,1.0))
+		elif (plot_name == 'Bootstrap Current Total'):
+			bootsj_data = bootsj.BOOTSJ()
+			l = 0
+			dl = len(self.bootsj_files)-1
+			if dl == 0: dl = 1
+			boot_total = []
+			for string in self.bootsj_files:
+				if 'answers_plot.' in string:
+					bootsj_data.read_answers_plot(self.workdir+string)
+					boot_total.append(float(bootsj_data.Itotal))
+			self.ax2.plot(self.stel_data.ITER[:-1],np.array(boot_total)/1000.,'o')
+			self.ax2.set_ylabel('I [kA]')
+			self.ax2.set_title('BOOTSJ Total Bootstrap Current')
+		elif (plot_name == 'g11'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.g11,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('g_{11}')
+			self.ax2.set_title('GIST g_{11} Metric')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'g12'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.g12,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('g_{12}')
+			self.ax2.set_title('GIST g_{12} Metric')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'g22'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.g22,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('g_{22}')
+			self.ax2.set_title('GIST g_{22} Metric')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'Bhat'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.Bhat,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('B-hat')
+			self.ax2.set_title(rf'GIST B-hat')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == '|Jac|'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.abs_jac,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('|Jac|')
+			self.ax2.set_title(rf'GIST |Jac|')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'L1'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.L1,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('L1')
+			self.ax2.set_title(rf'GIST L1')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'L2'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.L2,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('L2')
+			self.ax2.set_title(rf'GIST L2')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'dBdt'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					self.ax2.plot(zeta,gist_data.dBdt,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel(rf'$dB/d\theta$')
+			self.ax2.set_title(rf'GIST $dB/d\theta$')
+			self.ax2.set_xlim((-np.pi,np.pi))
+		elif (plot_name == 'Local Shear'):
+			gist_data = gist.GIST()
+			l=0
+			dl = len(self.gist_files)-1
+			if dl == 0 : dl = 1 
+			for string in self.gist_files:
+				if 'gist' in string:
+					gist_data.read_gist(self.workdir+string)
+					maxpnt = gist_data.gridpoints
+					zeta   = np.linspace(-np.pi,np.pi,maxpnt)
+					temp   = gist_data.g12/gist_data.g11
+					sloc   = np.gradient(temp,zeta)
+					self.ax2.plot(zeta,sloc,color=_plt.cm.brg(l/dl))
+					l=l+1
+			self.ax2.set_xlabel('Fieldline Coordinate')
+			self.ax2.set_ylabel('Local Shear')
+			self.ax2.set_title('GIST Local Shear')
+			self.ax2.set_xlim((-np.pi,np.pi))
 		self.canvas2.draw()
 
 	def PlotSTELLOPT(self,i):

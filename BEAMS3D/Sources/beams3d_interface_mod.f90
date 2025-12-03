@@ -154,8 +154,10 @@ CONTAINS
          leqdsk = .false.
          lcoil = .false.
          lmgrid = .false.
+         lmumat = .false.
          lvessel = .false.
          lvac = .false.
+         luser_init = .false.
          lcontinue_grid = .false.
          lrestart_particles = .false.
          lhitonly  = .false.
@@ -164,7 +166,6 @@ CONTAINS
          ldepo = .false.
          lbeam_simple = .false.
          lcollision = .false.
-         lw7x = .false.
          lascot = .false.
          lfidasim = .false.
          lfidasim_cyl = .false.
@@ -217,6 +218,10 @@ CONTAINS
             case ("-vmec")
                 i = i + 1
                 lvmec = .true.
+                CALL GETCARG(i, id_string, numargs)
+            case ("-user") ! Vacuum Fields Only
+                i = i + 1
+                luser_init = .true.
                 CALL GETCARG(i, id_string, numargs)
             case ("-pies")
                 i = i + 1
@@ -275,6 +280,10 @@ CONTAINS
                 i = i + 1
                 lvessel = .true.
                 CALL GETCARG(i, vessel_string, numargs)
+            case ("-mumat")
+                i = i + 1
+                lmumat = .true.
+                CALL GETCARG(i, mumat_string, numargs)
             case ("-beamlet")
                 i = i + 1
                 lbbnbi = .true.
@@ -285,8 +294,6 @@ CONTAINS
                 ldepo  = .true.
             case ("-raw")
                 lraw  = .true.
-            case ("-w7x")
-                lw7x  = .true.
             case ("-beam_simple")
                 lbeam_simple  = .true.
             case ("-collisions")
@@ -332,6 +339,7 @@ CONTAINS
                 write(6, *) '     -vessel file:    Vessel File (for limiting)'
                 write(6, *) '     -mgrid file:     MAKEGRID File (for vacuum)'
                 write(6, *) '     -coil file:      Coils. File (for vacuum)'
+                write(6, *) '     -mumat file:     Magnetic Materials File'
                 write(6, *) '     -restart ext:    BEAMS3D HDF5 extension for starting particles'
                 write(6, *) '     -beamlet ext:    Beamlet file for beam geometry'
                 write(6, *) '     -beam_simple:    Monoenergetic BEAMS'
@@ -375,8 +383,10 @@ CONTAINS
       CALL MPI_BCAST(restart_string, 256, MPI_CHARACTER, master, MPI_COMM_BEAMS, ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
       CALL MPI_BCAST(continue_grid_string, 256, MPI_CHARACTER, master, MPI_COMM_BEAMS, ierr_mpi)
-      IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)	  
+      IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
       CALL MPI_BCAST(eqdsk_string, 256, MPI_CHARACTER, master, MPI_COMM_BEAMS, ierr_mpi)
+      IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
+      CALL MPI_BCAST(mumat_string, 256, MPI_CHARACTER, master, MPI_COMM_BEAMS, ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
       CALL MPI_BCAST(lvmec, 1, MPI_LOGICAL, master, MPI_COMM_BEAMS, ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
@@ -397,6 +407,8 @@ CONTAINS
       CALL MPI_BCAST(lvessel, 1, MPI_LOGICAL, master, MPI_COMM_BEAMS, ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
       CALL MPI_BCAST(lvac, 1, MPI_LOGICAL, master, MPI_COMM_BEAMS, ierr_mpi)
+      IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
+      CALL MPI_BCAST(lmumat, 1, MPI_LOGICAL, master, MPI_COMM_BEAMS, ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
       CALL MPI_BCAST(lfidasim, 1, MPI_LOGICAL, master, MPI_COMM_BEAMS, ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR, 'beams3d_main', ierr_mpi)
@@ -426,8 +438,6 @@ CONTAINS
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
       CALL MPI_BCAST(lcollision,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
-      CALL MPI_BCAST(lw7x,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
-      IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
       CALL MPI_BCAST(lrandomize,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
       CALL MPI_BCAST(lsuzuki,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
@@ -447,6 +457,8 @@ CONTAINS
       CALL MPI_BCAST(lboxsim,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
       CALL MPI_BCAST(lbeamdensity,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
+      IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
+      CALL MPI_BCAST(luser_init,1,MPI_LOGICAL, master, MPI_COMM_BEAMS,ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)
       CALL MPI_BCAST(rminor_norm,1,MPI_DOUBLE_PRECISION, master, MPI_COMM_BEAMS,ierr_mpi)
       IF (ierr_mpi /= MPI_SUCCESS) CALL handle_err(MPI_BCAST_ERR,'beams3d_main',ierr_mpi)

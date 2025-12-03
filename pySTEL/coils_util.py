@@ -26,6 +26,8 @@ if __name__=="__main__":
 		help="Plot the coil-coil distance.", default = False)
 	parser.add_argument("--plotvolcoil", dest="heightwidth",
 		help="Plot volumetric coil of given width and height [m].", default = None)
+	parser.add_argument("--multifilamentcoil", dest="hwnhnw",
+		help="Create a multi-filament coil height,width,nheight,nwidth", default = None)
 	parser.add_argument("-b", "--bfield", dest="bxyz",
 		help="Output B field at x,y,z", default = None)
 	parser.add_argument("-a", "--afield", dest="axyz",
@@ -38,8 +40,14 @@ if __name__=="__main__":
 		help="Fit a surface to a coil.", default = False)
 	parser.add_argument("-o", "--output", dest="loutput", action='store_true',
 		help="Output the coil", default = False)
+	parser.add_argument("--gourdon", dest="lgourdon", action='store_true',
+		help="Output the coils in Gourdon format.", default = False)
 	parser.add_argument("--stl", dest="heightwidth_stl",
 		help="Generate STL of coil of given width and height [m].", default = None)
+	parser.add_argument("--flip", dest="lflip", action='store_true',
+		help="Flip the sign of the coils.", default = False)
+	parser.add_argument("--reverse", dest="lreverse", action='store_true',
+		help="Flip the toroidal direction of the coil.", default = False)
 	args = parser.parse_args()
 	coils = COILSET()
 	if args.coils_file: 
@@ -72,7 +80,11 @@ if __name__=="__main__":
 				for j in range(3):
 					wall_mesh.vectors[i][j] = vertex[f[j],:]
 			wall_mesh.save(args.coils_file+'.stl')
-		if args.loutput: coils.write_coils_file(args.coils_file+'_new')
+		if args.hwnhnw:
+			height,width,nh,nw = args.hwnhnw.split(',')
+			coils_new = coils.singleToMultiFilament(height=float(height),width=float(width),nheight=int(nh),nwidth=int(nw))
+			coils = coils_new
+			if args.lplot: coils.plotcoils()
 		if args.axyz:
 			x,y,z = args.axyz.split(',')
 			ax,ay,az = coils.coilvecpot(float(x),float(y),float(z))
@@ -81,6 +93,7 @@ if __name__=="__main__":
 			x,y,z = args.bxyz.split(',')
 			bx,by,bz = coils.coilbiot(float(x),float(y),float(z))
 			print(f"B-Field ({x},{y},{z}) : {bx}, {by}, {bz} [T]")
+			print(f"    |B| ({x},{y},{z}) : {np.sqrt(bx**2+by**2+bz**2)} [T]")
 		if args.wall_offset:
 			vertex = coils.coiloffset(float(args.wall_offset))
 			wall = WALL()
@@ -118,4 +131,9 @@ if __name__=="__main__":
 			z = FR.sfunct(theta,phi,zmns,xm,xn)
 			FR.isotoro(r,z,phi,0,plot3D=plt3d,lclosev=False)
 			plt3d.render()
+		if args.lflip: coils.flip()
+		if args.lreverse: coils.reverse()
+		if args.loutput: coils.write_coils_file(args.coils_file+'_new')
+		if args.lgourdon: coils.write_Gourdon_coils()
+	sys.exit(0)
 

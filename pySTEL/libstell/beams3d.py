@@ -63,18 +63,18 @@ class BEAMS3D():
 						 'wall_strikes', \
 						 'dist_rhoaxis', 'dist_uaxis', 'dist_paxis', \
 						 'dist_Vaxis', 'dist_Waxis', 'Shinethrough', \
-						 'Shineport', 'Energy']:
+						 'Shineport', 'Energy', 'E_NEUTRONS']:
 				if temp in f:
 					setattr(self, temp, np.array(f[temp][:]))
 			# Arrays (2D)
 			for temp in ['wall_vertex', 'wall_faces', \
-						 'wall_load', 'wall_shine', 'beam_density', \
+						 'wall_load', 'wall_shine', \
 						 'R_lines', 'Z_lines', 'PHI_lines', \
 						 'vll_lines', 'neut_lines', 'moment_lines', \
 						 'S_lines', 'U_lines', 'B_lines', \
 						 'ndot_prof', \
 						 'epower_prof', 'ipower_prof', 'j_prof', \
-						 'dense_prof', 'E_NEUTRONS']:
+						 'dense_prof','vr_lines','vphi_lines','vz_lines']:
 				if temp in f:
 					array = np.transpose(f[temp][:],(1,0))
 					setattr(self, temp, np.array(array))
@@ -92,7 +92,7 @@ class BEAMS3D():
 					array = np.transpose(f[temp][:],(3,2,1,0))
 					setattr(self, temp, np.array(array))
 			# Arrays (6D)
-			for temp in ['NEUTRON_RATE','beam_density']:
+			for temp in ['dist_prof']:
 				if temp in f:
 					array = np.transpose(f[temp][:],(5,4,3,2,1,0))
 					setattr(self, temp, np.array(array))
@@ -101,6 +101,9 @@ class BEAMS3D():
 		self.Y_lines = self.R_lines*np.sin(self.PHI_lines)
 		self.MODB    = np.sqrt(self.B_R**2 + self.B_PHI**2 + self.B_Z**2)
 		if hasattr(self,'wall_faces'): self.wall_faces = self.wall_faces - 1
+		if hasattr(self,'vr_lines'):
+			self.vx_lines = self.vr_lines * np.cos(self.PHI_lines) - self.vphi_lines * np.sin(self.PHI_lines)
+			self.vy_lines = self.vr_lines * np.sin(self.PHI_lines) + self.vphi_lines * np.cos(self.PHI_lines)
 		return
 
 	def calcVperp(self):
@@ -114,7 +117,8 @@ class BEAMS3D():
 		Vperp : float
 			Perpendicular velocity [m/s]
 		"""
-		mass2D = np.broadcast_to(self.mass,(self.nsteps+1,self.nparticles))
+		import numpy as np
+		mass2D = np.broadcast_to(self.mass,(self.npoinc+1,self.nparticles))
 		vperp  = np.sqrt(2.0*self.moment_lines*self.B_lines/mass2D)
 		vperp  = np.where(self.B_lines < 0,0,vperp)
 		return vperp
@@ -289,7 +293,7 @@ class BEAMS3D():
 
 		# Radial grid
 		if not ns:
-			ns = self.ns_prof1
+			ns = max(self.ns_prof1,32)
 		s  = np.linspace(0.0,1.0,ns)
 
 		# Extract data
@@ -367,7 +371,7 @@ class BEAMS3D():
 
 		# Radial grid
 		if not ns:
-			ns = self.ns_prof1
+			ns = max(self.ns_prof1,32)
 		s  = np.linspace(0.0,1.0,ns)
 
 		# Extract data
@@ -416,7 +420,7 @@ class BEAMS3D():
 		return np.array(raxis),np.array(zaxis)
 
 
-	def calcDepo(self,ns=None):
+	def calcDepo(self,ns=None,beams=None):
 		"""Calculates the deposition profile
 
 		This routine calcualtes the radial birth profile in
@@ -439,7 +443,7 @@ class BEAMS3D():
 
 		# Setup rho on centered grid
 		if not ns:
-			ns = self.ns_prof1
+			ns = max(self.ns_prof1,32)
 		edges = np.linspace(0.0,1.0,ns+1)
 		rho  = (edges[1:]+edges[0:-1])/2.0
 
@@ -454,10 +458,16 @@ class BEAMS3D():
 		if self.lbeam:
 			dex_start = 1
 
+		# Handle beams
+		if type(beams) is type(None):
+			beams_use = list(range(self.nbeams))
+		else:
+			beams_use = [x - 1 for x in beams] 
+
 		# Calc births
 		births    = np.zeros((self.nbeams,ns))
 		rho_lines = np.sqrt(self.S_lines)
-		for b in range(self.nbeams):
+		for b in beams_use:
 			#dexb = np.nonzero(self.Beam == (b+1))
 			dexb = self.Beam == (b+1)
 			rho_temp = rho_lines[dex_start,dexb]
@@ -528,7 +538,7 @@ class BEAMS3D():
 		import numpy as np
 		# Setup rho on centered grid
 		if not ns:
-			ns = self.ns_prof1
+			ns = max(self.ns_prof1,32)
 		edges = np.linspace(0.0,1.0,ns+1)
 		# Determine subset of particles for initial distribution
 		tdex = 1
@@ -561,7 +571,7 @@ class BEAMS3D():
 		# Calc losses
 		return (Itherm+Ilost)/area
 
-	def plotorbit(self,markers=None,plot3D=None):
+	def plotorbit(self,markers=None,color=None,plot3D=None):
 		"""Plots traces of the orbits in 3D
 
 		This routine plots traces of the particle orbits in 3D.
@@ -570,6 +580,8 @@ class BEAMS3D():
 		----------
 		markers : list (optional)
 			List of marker indices to plot (default: all)
+		color : string (optional)
+			Line color name, see VTK (scalars overrides)
 		plot3D : plot3D object (optional)
 			Plotting object to render to.
 		"""
@@ -590,17 +602,17 @@ class BEAMS3D():
 			markers_in = markers
 		# Plot markers
 		for i in markers_in:
-			j = np.argwhere(np.squeeze(self.R_lines[i,:])>0)
+			j = np.argwhere(np.squeeze(self.R_lines[:,i])>0)
 			k = j[-1][0]
 			points_array = np.zeros((k,3))
-			points_array[:,0] = self.X_lines[i,0:k]
-			points_array[:,1] = self.Y_lines[i,0:k]
-			points_array[:,2] = self.Z_lines[i,0:k]
+			points_array[:,0] = self.X_lines[0:k,i]
+			points_array[:,1] = self.Y_lines[0:k,i]
+			points_array[:,2] = self.Z_lines[0:k,i]
 			# Convert numpy array to VTK points
 			points = vtk.vtkPoints()
 			for point in points_array:
 				points.InsertNextPoint(point)
-			plt.add3Dline(points,linewidth=2)
+			plt.add3Dline(points,linewidth=2,color=color)
 		# In case it isn't set by user.
 		plt.setBGcolor()
 		# Render if requested
@@ -614,6 +626,7 @@ class BEAMS3D():
 			'heatflux'	: First wall heat flux
 			'shine'		: Shinethrough flux
 			'strikes' 	: Wall strikes
+			'none'	 	: Just plot the wall
 
 		Parameters
 		----------
@@ -647,15 +660,65 @@ class BEAMS3D():
 		elif load_type == 'shine':
 			val = np.sum(self.wall_shine[:,beams_use],axis=1)
 		elif load_type == 'strikes':
-			val = np.sum(self.wall_strikes[:,beams_use],axis=1)
+			val = self.wall_strikes[:]
+		elif load_type == 'none':
+			val = np.ones_like(self.wall_strikes)
 		else:
 			print(f'ERROR: plot_heatflux load_type must be heatflux, shine, or strikes. load_type={load_type} ')
 			return
 		# Make points
-		points,triangles = plt.facemeshTo3Dmesh(self.wall_vertex.T,self.wall_faces.T)
+		points,triangles = plt.facemeshTo3Dmesh(self.wall_vertex,self.wall_faces)
 		scalar = plt.valuesToScalar(val*factor)
 		# Add to Render
 		plt.add3Dmesh(points,triangles,FaceScalars=scalar,opacity=1.0,color=colormap)
+		# In case it isn't set by user.
+		plt.setBGcolor()
+		# Render if requested
+		if lplotnow: plt.render()
+
+	def plot_index3d(self,k,pointsize=0.01,color='red',plot3D=None):
+		"""Plots the BEAMS3D Points in 3D (by index)
+
+		This routine plots the BEAMS3D poincare points in 3D by
+		the index
+
+		Parameters
+		----------
+		k : int
+			Orbit index to plot.
+		pointsize : float (optional)
+			Size of points (default=0.01)
+		color : string (optional)
+			Dot color (default='red')
+		plot3D : plot3D object (optional)
+			Plotting object to render to.
+		"""
+		import numpy as np
+		import vtk
+		from libstell.plot3D import PLOT3D
+		# Handle optionals
+		if plot3D: 
+			lplotnow=False
+			plt = plot3D
+		else:
+			lplotnow = True
+			plt = PLOT3D()
+		vertices = []
+		scalar   = []
+		for i in range(self.nparticles):
+			if (self.R_lines[k,i] > 0):
+				vertices.append([self.X_lines[k,i],self.Y_lines[k,i],self.Z_lines[k,i]])
+				scalar.append(self.B_lines[k,i])
+		vertices = np.array(vertices)
+		scalar = plt.valuesToScalar(np.array(scalar))
+		points = plt.vertexToPoints(vertices)
+		# Add to Render
+		if float(scalar.GetValueRange()[1]) > 0:
+			plt.add3Dpoints(points,scalars=scalar,pointsize=pointsize)
+			# Colorbar
+			plt.colorbar()
+		else:
+			plt.add3Dpoints(points,pointsize=pointsize,color=color)
 		# In case it isn't set by user.
 		plt.setBGcolor()
 		# Render if requested

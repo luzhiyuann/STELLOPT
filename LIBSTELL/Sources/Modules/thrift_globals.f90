@@ -41,6 +41,7 @@
       INTEGER, DIMENSION(:), POINTER :: DKES_rundex
       INTEGER, DIMENSION(DKES_NS_MAX) :: DKES_K
       REAL(rprec), DIMENSION(DKES_NSTAR_MAX) :: DKES_Erstar, DKES_Nustar
+      LOGICAL :: save_DKES_coeffs
 
       ! Moved from thrift_runtime
       INTEGER :: nparallel_runs, mboz, nboz
@@ -48,7 +49,14 @@
                         mirror_ecrh, targettype_ecrh, antennatype_ecrh, &
                         etapar_type
 
-
+      ! Plasma solver
+      LOGICAL :: solve_plasma_equations, beurskens_ions, add_NEO
+      INTEGER, PARAMETER :: nions_max = 6
+      REAL(rprec) :: dt_plasma_solver, tol_plasma_solver
+      REAL(rprec) :: stiffness_beurskens, aLT_critical_beurskens, alpha_beurskens
+      INTEGER :: max_subiter_plasma_solver, Nr_plasma_solver
+      REAL(rprec), DIMENSION(nions_max+1) :: chi_all, T0_init_all
+      REAL(rprec), DIMENSION(nions_max) :: Dn_ions, N0_init_ions
 
       CONTAINS
 

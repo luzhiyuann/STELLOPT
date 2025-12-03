@@ -82,6 +82,136 @@ class GIST():
 				self.kp1 = self.L2 - self.dpdx/2.0/self.Bhat
 			i = i + 1
 
+	def calcGist(self,alpha,maxpnt,vmec_data,s):
+		"""Compute the GIST quantities from inputs
+
+		This routine computes the various GIST quantities based on a 
+		set of user inputs. It mimics the behavior of the STELLOPT
+		stellopt_txport code.
+
+		"""
+		import numpy as np
+		from scipy import interpolate
+		SEARCH_TOL = 1.0E-12
+		self.s0 = s
+		self.alpha0 = alpha
+		self.Rmajor = vmec_data.rmajor
+		self.Aminor = vmec_data.aminor
+		Ba = abs(vmec_data.phi[-1]/(np.pi*vmec_data.aminor*vmec_data.aminor))
+		iota = vmec_data.getiota(s)
+		iotap = vmec_data.getiotaprime(s)
+		pressp = vmec_data.getpressureprime(s)
+		mu0 = 4E-7*np.pi
+		q = 1.0/iota
+		qprime = -iotap*q*q
+		shat   = 2*s/q*qprime
+		# This comes from GIST
+		if (shat < 0.15): shat = 0.0
+		dpdx   = np.squeeze(-4.0*np.sqrt(s)/Ba**2 * pressp*mu0)
+		theta = np.linspace(-np.pi,np.pi,maxpnt)
+		self.dpdx = dpdx
+		self.q0   = q
+		self.shat = shat
+		self.gridpoints = maxpnt
+		self.n_pol = 1
+		self.g11     = np.zeros(self.gridpoints)
+		self.g12     = np.zeros(self.gridpoints)
+		self.g22     = np.zeros(self.gridpoints)
+		self.Bhat    = np.zeros(self.gridpoints)
+		self.abs_jac = np.zeros(self.gridpoints)
+		self.L2      = np.zeros(self.gridpoints)
+		self.L1      = np.zeros(self.gridpoints)
+		self.dBdt    = np.zeros(self.gridpoints)
+		for u in range(maxpnt):
+			zeta = self.alpha0 + q*(theta[u]-0.0)
+			# Compute thetastar (really theta)
+			zeta_save = zeta
+			thetastar = vmec_data.getTheta(s,theta[u],zeta)
+			if thetastar < 0: thetastar = thetastar + 2.0*np.pi
+			zeta = np.mod(zeta,2*np.pi/vmec_data.nfp)*vmec_data.nfp
+			# Now compute the Jacobian elements
+			R,phi,Z,dRds,dZds,dRdu,dZdu,dRdv,dZdv = vmec_data.get_flxcoord(s,thetastar,zeta)
+			# Calc covariant vectors
+			esubs = [dRds,0.0,dZds]
+			esubu = [dRdu,0.0,dZdu]
+			esubv = [dRdv*vmec_data.nfp,R,dZdv*vmec_data.nfp]
+			# Calc Jacobian
+			sqrtg = R*(dRdu*dZds-dRds*dZdu)
+			# Calc contravaiant vectors
+			es = np.array([esubu[1]*esubv[2]-esubu[2]*esubv[1],
+						   esubu[2]*esubv[0]-esubu[0]*esubv[2],
+			    		   esubu[0]*esubv[1]-esubu[1]*esubv[0]])/sqrtg
+			eu = np.array([esubv[1]*esubs[2]-esubv[2]*esubs[1],
+						   esubv[2]*esubs[0]-esubv[0]*esubs[2],
+						   esubv[0]*esubs[1]-esubv[1]*esubs[0]])/sqrtg
+			ev = np.array([esubs[1]*esubu[2]-esubs[2]*esubu[1],
+						   esubs[2]*esubu[0]-esubs[0]*esubu[2],
+						   esubs[0]*esubu[1]-esubs[1]*esubu[0]])/sqrtg
+			# Calc Grad(B)
+			th_arr = np.array([[thetastar]])
+			ze_arr = np.array([[zeta/vmec_data.nfp]])
+			#print(s,thetastar,zeta)
+			b = vmec_data.cfunct(th_arr,ze_arr,vmec_data.bmnc,vmec_data.xm_nyq,vmec_data.xn_nyq)
+			bumns = -vmec_data.bmnc*np.tile(vmec_data.xm_nyq,(1,vmec_data.ns)).T
+			bvmns =  vmec_data.bmnc*np.tile(vmec_data.xn_nyq,(1,vmec_data.ns)).T
+			x = np.linspace(0,1,vmec_data.ns)
+			rho = np.sqrt(x)
+			dbdrho = np.squeeze(np.diff(b,axis=0,prepend=0))/np.diff(rho,axis=0,prepend=1)
+			modb = np.interp(s,x,np.squeeze(b))
+			bs = np.interp(np.sqrt(s),rho,dbdrho)
+			f = vmec_data.sfunct(th_arr,ze_arr,bumns,vmec_data.xm_nyq,vmec_data.xn_nyq)
+			bu = np.interp(s,x,np.squeeze(f))
+			f = vmec_data.sfunct(th_arr,ze_arr,bvmns,vmec_data.xm_nyq,vmec_data.xn_nyq)
+			bv = -np.interp(s,x,np.squeeze(f))/vmec_data.nfp #negative sign to match STELLOPT
+			gradb = bs*es + bu*eu + bv*ev*vmec_data.nfp
+			# Adjust eu to include lambda factor
+			lam = vmec_data.sfunct(th_arr,ze_arr,vmec_data.lmns,vmec_data.xm,vmec_data.xn)
+			lumnc =  vmec_data.lmns*np.tile(vmec_data.xm,(1,vmec_data.ns)).T
+			lvmnc = -vmec_data.lmns*np.tile(vmec_data.xn,(1,vmec_data.ns)).T
+			dlamdrho = np.squeeze(np.diff(lam,axis=0,prepend=0))/np.diff(rho,axis=0,prepend=1)
+			ls = np.interp(np.sqrt(s),rho,dlamdrho)
+			f = vmec_data.cfunct(th_arr,ze_arr,lumnc,vmec_data.xm,vmec_data.xn)
+			lu = np.interp(s,x,np.squeeze(f))
+			f = vmec_data.cfunct(th_arr,ze_arr,lvmnc,vmec_data.xm,vmec_data.xn)
+			lv = -np.interp(s,x,np.squeeze(f))/vmec_data.nfp #negative sign to match STELLOPT
+			eu = eu + ls*es + lu*eu + lv*ev*vmec_data.nfp
+			# Calc metric elments
+			gradA = theta[u]*qprime*es + q*eu - ev
+			wrk = np.squeeze(np.array([es[1]*gradA[2]-es[2]*gradA[1],
+						   es[2]*gradA[0]-es[0]*gradA[2],
+						   es[0]*gradA[1]-es[1]*gradA[0]]))
+			jac1 = 1.0/(wrk[0]*eu[0]+wrk[1]*eu[1]+wrk[2]*eu[2])
+			gss = np.sum(es*es)
+			gsa = np.sum(es*gradA)
+			gst = np.sum(es*eu)
+			gaa = np.sum(gradA*gradA)
+			gat = np.sum(gradA*eu)
+			alpha = q*thetastar - zeta
+			# Now output the values
+			self.Bhat[u] = modb/Ba
+			self.g11[u]  = gss*self.Aminor*self.Aminor*0.25/s
+			self.g12[u]  = gsa*self.Aminor*self.Aminor*iota*0.5
+			self.g22[u] = (self.Bhat[u]*self.Bhat[u] + self.g12[u]*self.g12[u])/self.g11[u]
+			self.abs_jac[u] = abs(jac1*2*q/self.Aminor**3)
+			# Reuse some variables (order matters)
+			ea = np.array([eu[1]*es[2]-eu[2]*es[1],
+						   eu[2]*es[0]-eu[0]*es[2],
+						   eu[0]*es[1]-eu[1]*es[0]])*jac1
+			et = np.array([es[1]*gradA[2]-es[2]*gradA[1],
+						   es[2]*gradA[0]-es[0]*gradA[2],
+						   es[0]*gradA[1]-es[1]*gradA[0]])*jac1
+			es = np.array([gradA[1]*eu[2]-gradA[2]*eu[1],
+						   gradA[2]*eu[0]-gradA[0]*eu[2],
+						   gradA[0]*eu[1]-gradA[1]*eu[0]])*jac1
+			gradB = gradb/Ba
+			dBds  = np.sum(gradB*es)
+			dBda  = np.sum(gradB*ea)
+			self.dBdt[u] = np.sum(gradB*et)
+			c     = iota*iota*self.Aminor**4
+			self.L1[u] = q/np.sqrt(s)*(dBda + c*(gss*gat-gsa*gst)*self.dBdt[u]/(4*self.Bhat[u]**2))
+			self.L2[u] = 2.0*np.sqrt(s)*(dBds + c*(gaa*gst-gsa*gat)*self.dBdt[u]/(4*self.Bhat[u]**2))
+		self.kp1 = self.L2 - self.dpdx/2.0/self.Bhat
+
 	def calcProxG11(self):
 		"""Computes the G11 proxy
 
