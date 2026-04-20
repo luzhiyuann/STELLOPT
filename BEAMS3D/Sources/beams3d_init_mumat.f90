@@ -23,7 +23,8 @@
       USE mumaterial_mod, ONLY: mumaterial_load, mumaterial_init_new, &
                                 mumaterial_info, mumaterial_getbmag_scalar,&
                                 mumaterial_setverb, mumaterial_setd, &
-                                mumaterial_free, mumaterial_debug
+                                mumaterial_free, mumaterial_debug, &
+                                mumaterial_readmag, mumaterial_writemag
       USE mpi_params  
       USE mpi_inc      
       USE mpi_sharmem
@@ -75,12 +76,14 @@
       CALL mumaterial_debug(.FALSE.,.FALSE.,.FALSE.)
 
       ! Read the mu materials file
-      CALL MUMATERIAL_LOAD(TRIM(mumat_string),istat, MPI_COMM_MUSHARE, MPI_COMM_MUMASTER, MPI_COMM_BEAMS)
+      CALL mumaterial_load(TRIM(mumat_string),istat, MPI_COMM_MUSHARE, MPI_COMM_MUMASTER, MPI_COMM_BEAMS)
 
       ! Set parameters
-      CALL MUMATERIAL_SETD(mumaterial_tol, mumaterial_niter, mumaterial_lambda, &
+      CALL mumaterial_setd(mumaterial_tol, mumaterial_niter, mumaterial_lambda, &
                            mumaterial_lamfactor, mumaterial_lamthresh, & 
                            mumaterial_padfactor, mumaterial_convcheck) 
+      ! Load magnetization file
+      IF (lmumat_readmag) CALL mumaterial_readmag(TRIM(mumat_magfile))
 
       
 
@@ -89,7 +92,7 @@
 #endif
       
       IF (lverb) THEN
-         CALL mumaterial_info(6)
+         CALL mumaterial_info(6, lmumat_skipiter)
          WRITE(6,'(A,A)') '   FILE: ',TRIM(mumat_string)
          CALL FLUSH(6)
       END IF
@@ -100,11 +103,11 @@
          bcs2=(/-1,-1/)
          bcs3=(/ 0, 0/)
          CALL EZspline_init(BR_spl,nr,nphi,nz,bcs1,bcs2,bcs3,ier)
-         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumag:BR_spl',ier)
+         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumat:BR_spl',ier)
          CALL EZspline_init(BPHI_spl,nr,nphi,nz,bcs1,bcs2,bcs3,ier)
-         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumag:BPHI_spl',ier)
+         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumat:BPHI_spl',ier)
          CALL EZspline_init(BZ_spl,nr,nphi,nz,bcs1,bcs2,bcs3,ier)
-         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumag:BZ_spl',ier)
+         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumat:BZ_spl',ier)
          BR_spl%isHermite   = 1
          BR_spl%x1   = raxis
          BR_spl%x2   = phiaxis
@@ -118,11 +121,11 @@
          BZ_spl%x2   = phiaxis
          BZ_spl%x3   = zaxis
          CALL EZspline_setup(BR_spl,B_R,ier,EXACT_DIM=.true.)
-         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumag:BR_spl',ier)
+         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumat:BR_spl',ier)
          CALL EZspline_setup(BPHI_spl,B_PHI,ier,EXACT_DIM=.true.)
-         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumag:BPHI_spl',ier)
+         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumat:BPHI_spl',ier)
          CALL EZspline_setup(BZ_spl,B_Z,ier,EXACT_DIM=.true.)
-         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumag:BZ_spl',ier)
+         IF (ier /=0) CALL handle_err(EZSPLINE_ERR,'beams3d_init_mumat:BZ_spl',ier)
       END IF
       CALL MPI_BARRIER(MPI_COMM_MUSHARE, ier)
       CALL mpialloc(BR4D,   8, nr, nphi, nz, myid_sharmem, 0, MPI_COMM_MUSHARE, win_BR4D)
@@ -141,9 +144,12 @@
       eps3 = (zmax-zmin)*small
 
       ! Initialize the magnetic calculation
-      offset = 0.0
-      !CALL MUMATERIAL_INIT_NEW(beams3d_BCART, MPI_COMM_BEAMS, MPI_COMM_MUSHARE, MPI_COMM_MUMASTER, offset)
-      CALL MUMATERIAL_INIT_NEW(beams3d_BCART, offset)
+      IF (.NOT.(lmumat_skipiter)) THEN
+            offset = 0.0
+            CALL MUMATERIAL_INIT_NEW(beams3d_BCART, offset)
+      END IF
+      ! Output magnetics file
+      IF (lmumat_writemagfile) CALL mumaterial_writemag()
 
       ! Break up the Work
       CALL MPI_CALC_MYRANGE(MPI_COMM_BEAMS, 1, nr*nphi*nz, mystart, myend)
@@ -242,7 +248,7 @@
 
 #if defined(MPI_OPT)
       CALL MPI_BARRIER(MPI_COMM_BEAMS,ierr_mpi)
-      IF (ierr_mpi /=0) CALL handle_err(MPI_BARRIER_ERR,'beams3d_init_coil',ierr_mpi)
+      IF (ierr_mpi /=0) CALL handle_err(MPI_BARRIER_ERR,'beams3d_init_mumat',ierr_mpi)
 #endif
       
       RETURN

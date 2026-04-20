@@ -11,8 +11,9 @@
 !-----------------------------------------------------------------------
 !     Libraries
 !-----------------------------------------------------------------------
-      USE stellopt_runtime
-      USE stellopt_input_mod
+      USE stellopt_runtime, ONLY: mtargets, targets, sigmas, vals
+      USE stellopt_globals, ONLY: bigno
+!      USE stellopt_input_mod
       USE stellopt_targets
       IMPLICIT NONE
       
@@ -29,11 +30,8 @@
       REAL(rprec), INTENT(out) :: fvec(m)
       
 !-----------------------------------------------------------------------
-!     Local Variables
-!        ier         Error flag
-!        iunit       File unit number
+!     Local Variables (NONE)
 !----------------------------------------------------------------------
-      INTEGER ::  ier, iunit,m_sav
 
 !----------------------------------------------------------------------
 !     BEGIN SUBROUTINE
@@ -176,12 +174,21 @@
       !  COIL LENGTH
       IF (ANY(sigma_coil_length < bigno)) &
          CALL chisq_coil_length(target_coil_length, sigma_coil_length, ncnt, iflag)
+      !  COIL ENERGY
+      IF (ANY(sigma_coil_energy < bigno)) &
+         CALL chisq_coil_energy(target_coil_energy, sigma_coil_energy, ncnt, iflag)
       !  MEAN COIL CURVATURE
       IF (sigma_coil_curvature < bigno) &
          CALL chisq_coil_curvature(target_coil_curvature, sigma_coil_curvature, ncnt, iflag)
+      !  MEAN COIL DISTORTION
+      IF (sigma_coil_distortion < bigno) &
+         CALL chisq_coil_distortion(target_coil_distortion, sigma_coil_distortion, ncnt, iflag)
       !  MEAN COIL TORSION
       IF (sigma_coil_torsion < bigno) &
          CALL chisq_coil_torsion(target_coil_torsion, sigma_coil_torsion, ncnt, iflag)
+      !  TOTAL INTEGRAL COIL TORSION
+      IF (sigma_coil_total_torsion < bigno) &
+         CALL chisq_coil_total_torsion(target_coil_total_torsion, sigma_coil_total_torsion, ncnt, iflag)
       !  COIL-COIL DISTANCE
       IF (sigma_coilcoil_distance < bigno) &
          CALL chisq_coilcoil_distance(target_coilcoil_distance, sigma_coilcoil_distance, ncnt, iflag)
@@ -291,10 +298,17 @@
          CALL chisq_dkes_31(target_dkes_31, sigma_dkes_31, ncnt,iflag)
       IF (ANY(sigma_dkes_33 < bigno)) &
          CALL chisq_dkes_33(target_dkes_33, sigma_dkes_33, ncnt,iflag)
-      IF (ANY(sigma_dkes_erdiff < bigno)) &
-         CALL chisq_dkes_erdiff(target_dkes_erdiff, sigma_dkes_erdiff, ncnt,iflag)
-      IF (ANY(sigma_dkes_alpha < bigno)) &
-         CALL chisq_dkes_alpha(target_dkes_alpha, sigma_dkes_alpha, ncnt,iflag)
+      IF (ANY(sigma_dkes_boot < bigno)) &
+         CALL chisq_dkes_boot(target_dkes_boot, sigma_dkes_boot, ncnt,iflag)
+      IF (ANY(sigma_penta_er < bigno)) &
+         CALL chisq_penta_er(target_penta_er, sigma_penta_er, ncnt,iflag)
+      IF (ANY(sigma_penta_j < bigno)) &
+         CALL chisq_penta_j(target_penta_j, sigma_penta_j, ncnt,iflag)
+      ! For now not supported
+      !IF (ANY(sigma_dkes_erdiff < bigno)) &
+      !   CALL chisq_dkes_erdiff(target_dkes_erdiff, sigma_dkes_erdiff, ncnt,iflag)
+      !IF (ANY(sigma_dkes_alpha < bigno)) &
+      !   CALL chisq_dkes_alpha(target_dkes_alpha, sigma_dkes_alpha, ncnt,iflag)
       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       ! Orbit
       IF (ANY(sigma_orbit < bigno)) &
@@ -313,7 +327,11 @@
       IF (ncnt < 0) RETURN
       
       ! Check some stuff
-      IF (mtargets .ne. m) THEN; iflag=-2; RETURN; END IF
+      IF (mtargets /= m) THEN
+         PRINT *,'ERROR (mtargets /= m): ',ncnt,m,mtargets
+         iflag=-2
+         RETURN
+      END IF
       
       ! Calculate fvec
       !PRINT *,m,fvec

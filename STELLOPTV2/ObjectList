@@ -1,4 +1,12 @@
 ObjectFiles = \
+chisq_penta_j.o \
+chisq_penta_er.o \
+stellopt_penta.o \
+chisq_coil_distortion.o \
+chisq_coil_total_torsion.o \
+chisq_coil_energy.o \
+stellopt_run_vmec.o \
+chisq_dkes_boot.o \
 chisq_coil_length.o \
 stellopt_generate_coilsurf.o \
 chisq_coil_baxis.o \

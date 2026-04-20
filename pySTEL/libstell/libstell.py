@@ -542,6 +542,141 @@ class LIBSTELL():
 		write_beams3d_namelist.restype=None
 		write_beams3d_namelist(filename.encode('UTF-8'),len(filename))
 
+	def read_mumat_file(self,filename):
+		"""Reads a MUMATERIALS Tetrahedron file
+
+		This routine wrappers mumaterial_load function in
+		mumaterial_mod.
+
+		Parameters
+		----------
+		file : str
+			Path to wout file.
+		"""
+		import ctypes as ct
+		import numpy as np
+		# We use an added routine as a helper
+		module_name = self.s1+'mumaterial_mod_'+self.s2
+		read_mumat_file = getattr(self.libstell,module_name+'_mumaterial_load_serial'+self.s3)
+		read_mumat_file.argtypes = [ct.c_char_p,ct.POINTER(ct.c_int),ct.c_long]
+		read_mumat_file.restype = None
+		istat = ct.c_int(0)
+		read_mumat_file(filename.encode('UTF-8'),ct.byref(istat),len(filename))
+		if not (istat.value == 0):
+			return None
+		# First get integer values
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_nvertex'+self.s3)
+		get_var.argtypes = None
+		get_var.restype=ct.c_int
+		nvertex = get_var()
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_ntet'+self.s3)
+		get_var.argtypes = None
+		get_var.restype=ct.c_int
+		ntet = get_var()
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_nstate'+self.s3)
+		get_var.argtypes = None
+		get_var.restype=ct.c_int
+		nstate = get_var()
+		out_data = {'nvertex' : nvertex, 'ntet' : ntet, 'nstate' : nstate}
+		# Get Vertex values
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_vertex'+self.s3)
+		get_var.argtypes = [ct.POINTER(ct.c_double),ct.c_long]
+		get_var.restype = None
+		vertex = [0]*(3*nvertex)
+		vertex_c = (ct.c_double * (3 * nvertex))(*vertex)
+		get_var(vertex_c, 3*nvertex)
+		vertex = np.reshape(vertex_c,(nvertex,3))
+		out_data['vertex'] = vertex
+		# Get Tetrahedron values
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_tet'+self.s3)
+		get_var.argtypes = [ct.POINTER(ct.c_int),ct.c_long]
+		get_var.restype = None
+		tet = [0]*(4*ntet)
+		tet_c = (ct.c_int * (4 * ntet))(*tet)
+		get_var(tet_c, 4*ntet)
+		tet = np.reshape(tet_c,(ntet,4))
+		out_data['tet'] = tet
+		# Get state_dex values
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_statedex'+self.s3)
+		get_var.argtypes = [ct.POINTER(ct.c_int),ct.c_long]
+		get_var.restype = None
+		state_dex = [0]*ntet
+		state_dex_c = (ct.c_int * ntet)(*state_dex)
+		get_var(state_dex_c, ntet)
+		state_dex = np.reshape(state_dex_c,(ntet,1))
+		out_data['state_dex'] = state_dex
+		# Get state_dex values
+		get_var = getattr(self.libstell,module_name+'_mumaterial_get_statetype'+self.s3)
+		get_var.argtypes = [ct.POINTER(ct.c_int),ct.c_long]
+		get_var.restype = None
+		state_type = [0]*nstate
+		state_type_c = (ct.c_int * nstate)(*state_type)
+		get_var(state_type_c, nstate)
+		state_type = np.reshape(state_type_c,(nstate,1))
+		out_data['state_type'] = state_type
+		return out_data
+
+	def read_mumat_input(self,filename):
+		"""Reads a MUMATERIALS MUMAT_INPUT namelist
+
+		This routine wrappers mumaterial_read_nml function in
+		mumaterial_mod.
+
+		Parameters
+		----------
+		file : str
+			Path to wout file.
+		"""
+		import ctypes as ct
+		import numpy as np
+		# Call the initialization routine
+		module_name = self.s1+'mumaterial_mod_'+self.s2
+		init_mumat_input = getattr(self.libstell,module_name+'_mumaterial_init_nml'+self.s3)
+		init_mumat_input.argtypes = None
+		init_mumat_input.restype = None
+		init_mumat_input()
+		# Only read a file if we didn't pass an empty string.
+		if filename != '':
+			# We use an added routine as a helper
+			module_name = self.s1+'mumaterial_mod_'+self.s2
+			read_mumat_input = getattr(self.libstell,module_name+'_mumaterial_read_nml'+self.s3)
+			read_mumat_input.argtypes = [ct.c_char_p,ct.POINTER(ct.c_int),ct.c_long]
+			read_mumat_input.restype = None
+			istat = ct.c_int(0)
+			read_mumat_input(filename.encode('UTF-8'),ct.byref(istat),len(filename))
+			if not (istat.value == 0):
+				return None
+		# Get vars
+		intList=['maxiter','lambdathresh']
+		intLen=[1]*len(intList)
+		realList=['dmmax', 'lambdastart', 'lambdafactor', 'padfactor', 'convcheck']
+		realLen=[1]*len(realList)
+		module_name = self.s1+'mumaterial_mod_'+self.s2
+		out_data = self.get_module_vars(module_name,intVar=intList,intLen=intLen,realVar=realList,realLen=realLen,ldefined_size_arrays=True)
+		return out_data
+
+	def write_mumat_input(self,filename,out_dict=None):
+		"""Wrappers writing of the MUMAT_INPUT namelist
+
+		This routine wrappers mumaterial_write_nml_byfile in LIBSTELL
+
+		Parameters
+		----------
+		file : str
+			Path to input file.
+		"""
+		import ctypes as ct
+		module_name = self.s1+'mumaterial_mod_'+self.s2
+		# Check if we want to update values
+		if out_dict:
+			for key in out_dict:
+				self.set_module_var(module_name,key,out_dict[key])
+		module_name = self.s1+'mumaterial_mod_'+self.s2
+		write_mumat_namelist = getattr(self.libstell,module_name+'_mumaterial_write_nml_byfile'+self.s3)
+		write_mumat_namelist.argtypes = [ct.c_char_p,ct.c_long]
+		write_mumat_namelist.restype=None
+		write_mumat_namelist(filename.encode('UTF-8'),len(filename))
+
 	def read_diagno_in(self,filename):
 		"""Reads a DIAGNO_IN namelist
 
@@ -945,6 +1080,8 @@ class LIBSTELL():
 			'target_coilcoil_distance','sigma_coilcoil_distance', \
 			'target_curvature_p2', 'sigma_curvature_p2']
 		realLen=[1]*len(realList)
+		realList.extend(['target_coil_length', 'sigma_coil_length', 'target_coil_energy', 'sigma_coil_energy'])
+		realLen.extend([(nigroup,1)]*4)
 		realList.extend(['target_rosenbrock_f','sigma_rosenbrock_f'])
 		realLen.extend([(20,1),(20,1)])
 		realList.extend(['target_press', 'sigma_press', 'r_press', 'z_press', 'phi_press', \
@@ -1103,6 +1240,10 @@ class LIBSTELL():
 		realLen.extend([(scalar_data['mnmax_nyq'],1)]*2)
 		realList.extend(['am','ac','ai'])
 		realLen.extend([(21,1)]*3)
+		realList.extend(['am_aux_s','ac_aux_s','ai_aux_s'])
+		realLen.extend([(101,1)]*3)
+		realList.extend(['am_aux_f','ac_aux_f','ai_aux_f'])
+		realLen.extend([(101,1)]*3)
 		# Add 2D Arrays
 		realList.extend(['rmnc','zmns','lmns'])
 		realLen.extend([(scalar_data['ns'],scalar_data['mnmax'])]*3)
@@ -1230,7 +1371,9 @@ class LIBSTELL():
 					'mnmax_surface', 'nmax', 'mnd', 'nuv', 'nuv1', 'nuvh', 'nuvh1',\
 					'mnmax_pot']
 		intLen   = [1]*len(intList)
-		realList = ['iota_edge', 'phip_edge', 'curpol', 'cut', 'cup', 'curwt', 'trgwt','alp']
+		realList = ['iota_edge', 'phip_edge', 'curpol', 'cut', 'cup', 'curwt', 'trgwt','alp',\
+					'complexity', 'jsurf_max', 'jsurf_min', 'jsurf_ave', 'jcurvr_min', \
+					'jcurvr_max', 'berr_ave', 'berr_max', 'berr_var', 'bmod_rms', 'bmod_ave']
 		realLen = [1]*len(realList)
 		scalar_data = self.get_module_vars(module_name,booList,booLen,intList,intLen,realList,realLen)
 		# Get 1D Int Arrays
@@ -1415,6 +1558,98 @@ class LIBSTELL():
 		string_data = self.get_module_vars(module_name,charVar=charVar,charLen=charLen,ldefined_size_arrays=True)
 		# Return
 		return scalar_data | array_data | string_data
+
+	def spline_coils_init_boundary(self,mnmax_in,xm_in,xn_in,rmnc_in,zmns_in,rmnc_ax,zmns_ax):
+		"""Initialize boundary data for spline coil.
+
+		This routine wrappers init_boundary_spline_coils in 
+		LIBSTELL:spline_coils_mod.
+
+		Parameters
+		----------
+		mnmax_in : int
+			Number of modes in arrays.
+		xm_in : list
+			Poloidal Mode array
+		xn_in : list
+			Toroidal Mode array
+		rmnc_in : list
+			R cosine boundary Harmonics
+		zmns_in : list
+			Z sine boundary Harmonics
+		rmnc_ax : list
+			R cosine axis Harmonics
+		zmns_ax : list
+			Z sine axis Harmonics
+		"""
+		import ctypes as ct
+		module_name = self.s1+'spline_coils_mod_'+self.s2
+		boundinit = getattr(self.libstell,module_name+'_init_boundary_spline_coils'+self.s3)
+		boundinit.argtypes=[ct.POINTER(ct.c_int), \
+			ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), 
+			ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), 
+			ct.POINTER(ct.c_double), ct.POINTER(ct.c_double), 
+			ct.c_long, ct.c_long, ct.c_long, ct.c_long, ct.c_long, ct.c_long]
+		boundinit.restype=None
+		mnmax_c = ct.c_int(mnmax_in)
+		xm_c = (ct.c_double * len(xm_in))(*xm_in)
+		xn_c = (ct.c_double * len(xn_in))(*xn_in)
+		rmnc_c = (ct.c_double * len(rmnc_in))(*rmnc_in)
+		zmns_c = (ct.c_double * len(zmns_in))(*zmns_in)
+		rmnc_ax_c = (ct.c_double * len(rmnc_ax))(*rmnc_ax)
+		zmns_ax_c = (ct.c_double * len(zmns_ax))(*zmns_ax)
+		boundinit(ct.byref(mnmax_c), xm_c, xn_c,rmnc_c, zmns_c, rmnc_ax_c, zmns_ax_c, \
+			len(xm_in), len(xn_in), len(rmnc_in), len(zmns_in), len(rmnc_ax), len(zmns_ax))
+		return
+
+	def spline_coils_xyz2rhothetazeta(self,x,y,z,rhog,thetag):
+		"""Computes the rho,theta,zeta coil value given X,Y,Z
+
+		This routine wrappers xyz2rhothetazeta in 
+		LIBSTELL:spline_coils_mod.
+
+		Parameters
+		----------
+		x : real
+			X value [m].
+		y : real
+			Y value [m].
+		z : real
+			Z value [m].
+		rhog : real
+			Rho value guess [m].
+		thetag : real
+			Theta value guess [rad].
+
+		Returns
+		-------
+		rho : real
+			Rho value [m].
+		theta : real
+			Theta value [rad].
+		zeta : real
+			Zeta value [rad].
+		"""
+
+		import ctypes as ct
+		module_name = self.s1+'spline_coils_mod_'+self.s2
+		xyz2rtz = getattr(self.libstell,module_name+'_xyz2rhothetazeta'+self.s3)
+		xyz2rtz.argtypes = [ct.POINTER(ct.c_double),ct.POINTER(ct.c_double),ct.POINTER(ct.c_double), \
+			ct.POINTER(ct.c_double),ct.POINTER(ct.c_double),ct.POINTER(ct.c_double)]
+		xyz2rtz.restype=None
+		zetag = 0.0
+		x_c = ct.c_double(x)
+		y_c = ct.c_double(y)
+		z_c = ct.c_double(z)
+		rho_c = ct.c_double(rhog)
+		theta_c = ct.c_double(thetag)
+		zeta_c = ct.c_double(zetag)
+		xyz2rtz(ct.byref(x_c),ct.byref(y_c),ct.byref(z_c), \
+			ct.byref(rho_c),ct.byref(theta_c),ct.byref(zeta_c))
+		rho = rho_c.value
+		theta = theta_c.value
+		zeta = zeta_c.value
+		return rho,theta,zeta
 
 	def get_module_vars(self,modName,booVar=None,booLen=None,\
 		intVar=None,intLen=None,realVar=None,realLen=None,\
@@ -1780,6 +2015,128 @@ class LIBSTELL():
 		if not (ierr.value == 0):
 			return None
 
+	def define_friction_coeffs(self,masses,charges,v_ths,Temps,dens,
+                                loglambda,num_species,Smax):
+		"""Wrapper to define_friction_coeffs subroutine
+
+		This routine wrappers the define_friction_coeffs subroutine found in
+		LIBSTELL/Sources/Modules/transport_mod. It computes the friction
+		coefficients between all species and at all orders (up to Smax) 
+  		as derived in J. Lore PhD Thesis
+
+		Parameters
+		----------
+		masses : real
+			Array of species masses [kg].
+		charges : real
+			Array of species charges [C].
+		v_ths : real
+			Array of thermal velocities [m/s].
+		Temps : real
+			Array of temperatures [eV].
+		dens : real
+			Array of densities [m^-3].
+		loglambda : real
+			Coulomb logarithm (assumed same for all species).
+		num_species : int
+			Number of species.
+		Smax : int
+			Order of Sonine polynomial expansion.
+		Returns
+		-------
+		lmat : matrix of friction coefficients (:,:,:,:)
+	  		First two indices are the plasma species (ex: l_ei)
+    	    Second two indices are the order (ex: l_ee^1,1)
+		"""
+		import ctypes as ct
+		import numpy as np
+		module_name = self.s1+'transport_mod_'+self.s2
+		defFrictionCoeffs = getattr(self.libstell,module_name+'_define_friction_coeffs'+self.s3)
+		defFrictionCoeffs.argtypes = [ct.POINTER(ct.c_double),ct.POINTER(ct.c_double),ct.POINTER(ct.c_double), \
+			ct.POINTER(ct.c_double),ct.POINTER(ct.c_double),ct.POINTER(ct.c_double), \
+			ct.POINTER(ct.c_long),ct.POINTER(ct.c_long),ct.POINTER(ct.c_double)]
+		defFrictionCoeffs.restype=None
+		masses = np.ascontiguousarray(masses, dtype=np.float64)
+		charges = np.ascontiguousarray(charges, dtype=np.float64)
+		v_ths = np.ascontiguousarray(v_ths, dtype=np.float64)
+		Temps = np.ascontiguousarray(Temps, dtype=np.float64)
+		dens = np.ascontiguousarray(dens, dtype=np.float64)
+		loglambda = ct.c_double(loglambda)
+		lmat = np.zeros(((Smax+1)*num_species, (Smax+1)*num_species), order='F', dtype=np.float64)
+		num_species = ct.c_long(num_species)
+		Smax = ct.c_long(Smax)
+		defFrictionCoeffs(
+			masses.ctypes.data_as(ct.POINTER(ct.c_double)),
+			charges.ctypes.data_as(ct.POINTER(ct.c_double)),
+			v_ths.ctypes.data_as(ct.POINTER(ct.c_double)),
+			Temps.ctypes.data_as(ct.POINTER(ct.c_double)),
+			dens.ctypes.data_as(ct.POINTER(ct.c_double)),
+			ct.byref(loglambda),
+			ct.byref(num_species),
+			ct.byref(Smax),
+			lmat.ctypes.data_as(ct.POINTER(ct.c_double))
+		)
+		return lmat
+
+	def collision_frequency_penta(self,vparticles,masses,Zcharges,Temps,dens,
+                                   loglambda,Nvparticles,num_species):
+		"""Wrapper to collision_frequency_penta function
+
+		This routine wrappers the function collision_frequency penta found in
+		LIBSTELL/Sources/Modules/transport_mod. It computes the collision frequency
+		between test particles with v=vparticles and all species in the plasma. The returned
+		The collision frequency is the sum of sum_b(nu_ab) where a is the test particle and b
+		all species in the plasma.
+
+		Parameters
+		----------
+		vparticles : real
+			Array of test particle velocities [m/s].
+		masses : real
+			Array of species masses [kg].
+		Zcharges : real
+			Array of species charge numbers [-].
+		Temps : real
+			Array of temperatures [eV].
+		dens : real
+			Array of densities [m^-3].
+		loglambda : real
+			Coulomb logarithm (assumed same for all species).
+		Nvparticles : int
+			Number of test particles.
+		num_species : int
+			Number of species.
+		Returns
+		-------
+		nu : array of collision frequencies as defined in PENTA code (Nvparticles)
+		"""
+		import ctypes as ct
+		import numpy as np
+		module_name = self.s1+'transport_mod_'+self.s2
+		collFrequencyPENTA = getattr(self.libstell,module_name+'_collision_frequency_penta'+self.s3)
+		collFrequencyPENTA.argtypes = [ct.POINTER(ct.c_double),ct.POINTER(ct.c_double),ct.POINTER(ct.c_double), \
+			ct.POINTER(ct.c_double),ct.POINTER(ct.c_double),ct.POINTER(ct.c_double), \
+			ct.POINTER(ct.c_long),ct.POINTER(ct.c_long)]
+		collFrequencyPENTA.restype=None
+		masses = np.ascontiguousarray(masses, dtype=np.float64)
+		Zcharges = np.ascontiguousarray(Zcharges, dtype=np.float64)
+		vparticles = np.ascontiguousarray(vparticles, dtype=np.float64)
+		Temps = np.ascontiguousarray(Temps, dtype=np.float64)
+		dens = np.ascontiguousarray(dens, dtype=np.float64)
+		loglambda = ct.c_double(loglambda)
+		num_species = ct.c_long(num_species)
+		nu = np.zeros(Nvparticles, dtype=np.float64)
+		Nvparticles = ct.c_long(Nvparticles)
+		collFrequencyPENTA(vparticles.ctypes.data_as(ct.POINTER(ct.c_double)),
+                                        masses.ctypes.data_as(ct.POINTER(ct.c_double)),
+                                        Zcharges.ctypes.data_as(ct.POINTER(ct.c_double)),
+                                        Temps.ctypes.data_as(ct.POINTER(ct.c_double)),
+                                        dens.ctypes.data_as(ct.POINTER(ct.c_double)),
+                                        ct.byref(loglambda),
+                                        ct.byref(Nvparticles),
+										ct.byref(num_species),
+           								nu.ctypes.data_as(ct.POINTER(ct.c_double)))
+		return nu
 class FourierRep():
 	def __init__(self, parent=None):
 		test = None
